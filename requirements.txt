@@ -1,4 +1,9 @@
-# List of dependencies
-flask
-langchain
-chromadb
+Flask==2.3.3
+LangGraph==0.0.1
+playwright==1.40.0
+chromadb==0.4.14
+ollama==0.0.1
+pydantic==2.0.0
+python-dotenv==1.0.0
+requests==2.31.0
+langchain==0.1.0
