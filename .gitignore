@@ -1,5 +1,11 @@
 __pycache__/
+*.pyc
+*.pyo
 venv/
+.venv/
 .env
-data/sessions/
-data/chromadb/
+data/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
