@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Agent Dashboard</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🤖 AI Agent</div>
+    <div class="nav-tabs">
+      <button class="tab-btn active" data-tab="tasks">المهام</button>
+      <button class="tab-btn" data-tab="chat">المحادثة</button>
+      <button class="tab-btn" data-tab="memory">الذاكرة</button>
+      <button class="tab-btn" data-tab="rag">المستندات</button>
+      <button class="tab-btn" data-tab="scheduler">الجدولة</button>
+    </div>
+    <div id="health-dot" class="health-dot" title="Status"></div>
+  </nav>
+
+  <!-- TASKS TAB -->
+  <section id="tab-tasks" class="tab-content active">
+    <div class="panel">
+      <h2>تنفيذ مهمة جديدة</h2>
+      <textarea id="task-input" placeholder="اكتب مهمتك هنا… مثال: اكتب سكريبت Python يحسب أول 20 رقم فيبوناتشي" rows="4"></textarea>
+      <div class="btn-row">
+        <button id="run-task-btn" class="btn primary">▶ تشغيل</button>
+        <button id="clear-output-btn" class="btn secondary">مسح</button>
+      </div>
+      <div id="task-output" class="output-box"></div>
+    </div>
+    <div class="panel">
+      <h2>المهام الأخيرة</h2>
+      <button id="refresh-tasks-btn" class="btn secondary small">↻ تحديث</button>
+      <div id="tasks-list" class="tasks-list"></div>
+    </div>
+  </section>
+
+  <!-- CHAT TAB -->
+  <section id="tab-chat" class="tab-content">
+    <div class="panel chat-panel">
+      <div id="chat-messages" class="chat-messages"></div>
+      <div class="chat-input-row">
+        <input id="chat-input" type="text" placeholder="اكتب رسالتك…" />
+        <button id="chat-send-btn" class="btn primary">إرسال</button>
+        <button id="chat-clear-btn" class="btn secondary">مسح المحادثة</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MEMORY TAB -->
+  <section id="tab-memory" class="tab-content">
+    <div class="panel">
+      <h2>بحث في الذاكرة</h2>
+      <div class="input-row">
+        <input id="memory-query" type="text" placeholder="ابحث في الذاكرة…" />
+        <button id="memory-search-btn" class="btn primary">بحث</button>
+      </div>
+      <div id="memory-results" class="output-box"></div>
+    </div>
+    <div class="panel">
+      <h2>حفظ في الذاكرة</h2>
+      <input id="memory-key" type="text" placeholder="المفتاح (key)" />
+      <textarea id="memory-content" placeholder="المحتوى" rows="3"></textarea>
+      <button id="memory-store-btn" class="btn primary">حفظ</button>
+      <div id="memory-store-result" class="output-box" style="min-height:40px"></div>
+    </div>
+  </section>
+
+  <!-- RAG TAB -->
+  <section id="tab-rag" class="tab-content">
+    <div class="panel">
+      <h2>رفع مستند</h2>
+      <div class="upload-area" id="upload-area">
+        <span>اسحب الملف هنا أو <label for="file-input" class="link">اختر ملفاً</label></span>
+        <input id="file-input" type="file" accept=".txt,.pdf,.md,.py,.js,.json,.csv" style="display:none" />
+      </div>
+      <div id="upload-result" class="output-box" style="min-height:40px"></div>
+    </div>
+    <div class="panel">
+      <h2>سؤال على المستندات</h2>
+      <div class="input-row">
+        <input id="rag-query" type="text" placeholder="اسأل سؤالاً عن مستنداتك…" />
+        <button id="rag-ask-btn" class="btn primary">سؤال</button>
+      </div>
+      <div id="rag-answer" class="output-box"></div>
+    </div>
+    <div class="panel">
+      <h2>المستندات المرفوعة</h2>
+      <button id="refresh-docs-btn" class="btn secondary small">↻ تحديث</button>
+      <div id="docs-list" class="tasks-list"></div>
+    </div>
+  </section>
+
+  <!-- SCHEDULER TAB -->
+  <section id="tab-scheduler" class="tab-content">
+    <div class="panel">
+      <h2>إضافة مهمة مجدولة</h2>
+      <input id="sched-name" type="text" placeholder="اسم المهمة" />
+      <textarea id="sched-task" placeholder="نص المهمة" rows="3"></textarea>
+      <div class="input-row">
+        <input id="sched-cron" type="text" placeholder="Cron expression (مثال: 0 8 * * *)" />
+        <button id="sched-add-btn" class="btn primary">إضافة</button>
+      </div>
+      <div id="sched-result" class="output-box" style="min-height:40px"></div>
+    </div>
+    <div class="panel">
+      <h2>المهام المجدولة</h2>
+      <button id="refresh-sched-btn" class="btn secondary small">↻ تحديث</button>
+      <div id="sched-list" class="tasks-list"></div>
+    </div>
+  </section>
+
+  <script src="/static/js/main.js"></script>
+</body>
+</html>

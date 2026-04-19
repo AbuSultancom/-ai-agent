@@ -147,6 +147,64 @@ def _build_tool_definitions() -> list[dict]:
                 "required": ["query"],
             },
         },
+        {
+            "name": "send_email",
+            "description": "Send an email notification. Requires SMTP config in environment.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email address"},
+                    "subject": {"type": "string", "description": "Email subject"},
+                    "body": {"type": "string", "description": "Email body text"},
+                },
+                "required": ["to", "subject", "body"],
+            },
+        },
+        {
+            "name": "github",
+            "description": "Interact with GitHub: read repos/files/issues/PRs, create issues, search code.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["get_repo", "list_repos", "get_file", "list_files",
+                                 "list_issues", "create_issue", "comment_on_issue",
+                                 "list_prs", "create_pr", "search_code"],
+                        "description": "GitHub action to perform",
+                    },
+                    "owner": {"type": "string", "description": "Repository owner"},
+                    "repo": {"type": "string", "description": "Repository name"},
+                    "path": {"type": "string", "description": "File path in repo"},
+                    "title": {"type": "string", "description": "Issue/PR title"},
+                    "body": {"type": "string", "description": "Issue/PR body"},
+                    "head": {"type": "string", "description": "PR head branch"},
+                    "base": {"type": "string", "description": "PR base branch"},
+                    "number": {"type": "integer", "description": "Issue/PR number"},
+                    "query": {"type": "string", "description": "Search query"},
+                    "username": {"type": "string", "description": "GitHub username"},
+                    "state": {"type": "string", "enum": ["open", "closed", "all"], "default": "open"},
+                    "comment": {"type": "string", "description": "Comment text"},
+                },
+                "required": ["action"],
+            },
+        },
+        {
+            "name": "execute_python",
+            "description": "Execute Python code in a safe sandbox and return stdout/stderr. Great for calculations, data processing, generating charts, etc.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code to execute"},
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Timeout in seconds (default 15)",
+                        "default": 15,
+                    },
+                },
+                "required": ["code"],
+            },
+        },
     ]
 
 
@@ -214,6 +272,19 @@ class AIOrchestrator:
             if name == "memory_search":
                 results = self.memory.search(inputs["query"], inputs.get("n_results", 5))
                 return json.dumps(results, ensure_ascii=False, indent=2)
+            if name == "send_email":
+                from core.notifications import send_email
+                return send_email(inputs["to"], inputs["subject"], inputs["body"])
+            if name == "github":
+                from tools.github_tools import GitHubTools
+                gh = GitHubTools()
+                action = inputs.pop("action")
+                return gh.dispatch(action, **inputs)
+            if name == "execute_python":
+                from tools.code_sandbox import CodeSandbox
+                sandbox = CodeSandbox()
+                result = sandbox.execute(inputs["code"], inputs.get("timeout", 15))
+                return sandbox.format_result(result)
             return f"Unknown tool: {name}"
         except Exception as exc:
             logger.warning("Tool %s raised: %s", name, exc)
