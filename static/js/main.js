@@ -29,14 +29,17 @@ function renderMarkdown(text) {
     .replace(/\n/g, '<br>');
 }
 
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function showToast(msg, type = 'ok') {
-  const t = document.createElement('div');
-  t.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
-    background:${type === 'ok' ? '#48bb78' : '#fc8181'};color:#fff;padding:10px 22px;
-    border-radius:8px;font-size:14px;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,.4)`;
+  const t = $('toast');
   t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 2800);
+  t.style.borderColor = type === 'ok' ? 'var(--ok)' : 'var(--err)';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2800);
 }
 
 /* ───────── Health check ───────── */
@@ -89,7 +92,8 @@ async function runTask() {
       btn.disabled = false;
       btn.textContent = '▶ تشغيل';
       loadTasks();
-      showToast(e.data === 'completed' ? '✅ اكتملت المهمة' : '❌ فشلت المهمة', e.data === 'completed' ? 'ok' : 'err');
+      showToast(e.data === 'completed' ? '✅ اكتملت المهمة' : '❌ فشلت المهمة',
+        e.data === 'completed' ? 'ok' : 'err');
     });
     currentEventSource.onerror = () => {
       currentEventSource.close();
@@ -127,19 +131,16 @@ async function loadTasks() {
 
 function showTaskOutput(id, taskText) {
   $('task-input').value = taskText;
-  $('tab-tasks').scrollIntoView();
   API(`/api/task/${id}`).then(r => r.json()).then(t => {
     taskOutput.textContent = t.output || '(لا يوجد مخرجات)';
     taskOutput.scrollTop = taskOutput.scrollHeight;
   });
 }
 
-function escHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
 loadTasks();
 
 /* ═══════════════════════════════════════
-   TAB 2 — CHAT
+   TAB 2 — CHAT (with Personas)
 ═══════════════════════════════════════ */
 let chatHistory = JSON.parse(localStorage.getItem('chat_history') || '[]');
 
@@ -154,11 +155,11 @@ async function sendChat() {
   const input = $('chat-input');
   const text = input.value.trim();
   if (!text) return;
+  const personaId = $('persona-select').value;
   input.value = '';
   chatHistory.push({ role: 'user', content: text });
   renderChat();
 
-  // Typing indicator
   const typing = document.createElement('div');
   typing.className = 'msg assistant typing';
   typing.textContent = 'يكتب…';
@@ -166,7 +167,11 @@ async function sendChat() {
   $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
 
   try {
-    const res = await APIJ('/api/chat', { message: text, history: chatHistory.slice(-20) });
+    const endpoint = personaId !== 'default' ? '/api/chat/persona' : '/api/chat';
+    const body = personaId !== 'default'
+      ? { message: text, persona_id: personaId }
+      : { message: text, history: chatHistory.slice(-20) };
+    const res = await APIJ(endpoint, body);
     const data = await res.json();
     typing.remove();
     const reply = data.reply || data.error || 'لا رد';
@@ -293,7 +298,328 @@ async function deleteDoc(name) {
 loadDocs();
 
 /* ═══════════════════════════════════════
-   TAB 5 — SCHEDULER
+   TAB 5 — VISION
+═══════════════════════════════════════ */
+let visionFile = null;
+const visionArea = $('vision-upload-area');
+const visionInput = $('vision-file-input');
+const visionPreview = $('vision-preview');
+
+visionArea.addEventListener('click', () => visionInput.click());
+visionArea.addEventListener('dragover', e => { e.preventDefault(); visionArea.classList.add('dragover'); });
+visionArea.addEventListener('dragleave', () => visionArea.classList.remove('dragover'));
+visionArea.addEventListener('drop', e => {
+  e.preventDefault();
+  visionArea.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) setVisionFile(e.dataTransfer.files[0]);
+});
+visionInput.addEventListener('change', () => { if (visionInput.files[0]) setVisionFile(visionInput.files[0]); });
+
+function setVisionFile(file) {
+  visionFile = file;
+  const url = URL.createObjectURL(file);
+  visionPreview.src = url;
+  visionPreview.style.display = 'block';
+}
+
+$('vision-analyze-btn').addEventListener('click', async () => {
+  if (!visionFile) return showToast('اختر صورة أولاً', 'err');
+  const box = $('vision-result');
+  box.textContent = 'جارٍ التحليل…';
+  const fd = new FormData();
+  fd.append('image', visionFile);
+  const q = $('vision-question').value.trim();
+  if (q) fd.append('question', q);
+  try {
+    const r = await fetch('/api/vision/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    box.textContent = data.analysis || data.error || 'لا توجد نتيجة';
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+$('vision-ocr-btn').addEventListener('click', async () => {
+  if (!visionFile) return showToast('اختر صورة أولاً', 'err');
+  const box = $('vision-result');
+  box.textContent = 'جارٍ استخراج النص…';
+  const fd = new FormData();
+  fd.append('image', visionFile);
+  try {
+    const r = await fetch('/api/vision/ocr', { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    box.textContent = data.text || data.error || 'لا يوجد نص';
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+$('vision-url-btn').addEventListener('click', async () => {
+  const url = $('vision-url').value.trim();
+  if (!url) return showToast('أدخل رابط الصورة', 'err');
+  const box = $('vision-url-result');
+  box.textContent = 'جارٍ التحليل…';
+  try {
+    const r = await APIJ('/api/vision/analyze', { url, question: $('vision-url-question').value.trim() });
+    const data = await r.json();
+    box.textContent = data.analysis || data.error || 'لا توجد نتيجة';
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+/* ═══════════════════════════════════════
+   TAB 6 — DATA ANALYSIS
+═══════════════════════════════════════ */
+let dataFile = null;
+const dataArea = $('data-upload-area');
+const dataInput = $('data-file-input');
+
+dataArea.addEventListener('click', () => dataInput.click());
+dataArea.addEventListener('dragover', e => { e.preventDefault(); dataArea.classList.add('dragover'); });
+dataArea.addEventListener('dragleave', () => dataArea.classList.remove('dragover'));
+dataArea.addEventListener('drop', e => {
+  e.preventDefault();
+  dataArea.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) { dataFile = e.dataTransfer.files[0]; dataArea.querySelector('span').textContent = `📊 ${dataFile.name}`; }
+});
+dataInput.addEventListener('change', () => {
+  if (dataInput.files[0]) { dataFile = dataInput.files[0]; dataArea.querySelector('span').textContent = `📊 ${dataFile.name}`; }
+});
+
+$('data-analyze-btn').addEventListener('click', async () => {
+  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  const box = $('data-result');
+  box.textContent = 'جارٍ التحليل…';
+  const fd = new FormData();
+  fd.append('file', dataFile);
+  const q = $('data-question').value.trim();
+  if (q) fd.append('question', q);
+  try {
+    const r = await fetch('/api/data/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    box.textContent = data.answer || data.error || JSON.stringify(data);
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+$('data-summary-btn').addEventListener('click', async () => {
+  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  const box = $('data-result');
+  box.textContent = 'جارٍ التحميل…';
+  const fd = new FormData();
+  fd.append('file', dataFile);
+  try {
+    const r = await fetch('/api/data/upload', { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    box.textContent = data.summary || data.error || JSON.stringify(data);
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+$('chart-btn').addEventListener('click', async () => {
+  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  const resultDiv = $('chart-result');
+  resultDiv.innerHTML = '<p style="color:var(--muted)">جارٍ إنشاء المخطط…</p>';
+  const fd = new FormData();
+  fd.append('file', dataFile);
+  fd.append('chart_type', $('chart-type').value);
+  fd.append('x_col', $('chart-x').value.trim());
+  fd.append('y_col', $('chart-y').value.trim());
+  try {
+    const r = await fetch('/api/data/chart', { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    if (data.url) {
+      resultDiv.innerHTML = `<img src="${data.url}" alt="chart" />`;
+    } else {
+      resultDiv.textContent = data.error || JSON.stringify(data);
+    }
+  } catch (e) { resultDiv.textContent = `خطأ: ${e.message}`; }
+});
+
+/* ═══════════════════════════════════════
+   TAB 7 — PERSONAS
+═══════════════════════════════════════ */
+$('refresh-personas-btn').addEventListener('click', loadPersonas);
+
+async function loadPersonas() {
+  try {
+    const r = await API('/api/personas');
+    const { personas } = await r.json();
+    const grid = $('personas-list');
+    grid.innerHTML = personas.map(p => `
+      <div class="persona-card" onclick="selectPersona('${p.id}')">
+        <div class="p-emoji">${p.emoji || '🤖'}</div>
+        <div class="p-name">${escHtml(p.name)}</div>
+        <div class="p-desc">${escHtml(p.description || '')}</div>
+        ${p.builtin ? '' : `<button class="btn danger small p-badge" onclick="deletePersona(event,'${p.id}')">حذف</button>`}
+      </div>`).join('');
+
+    // Also populate persona select in chat tab
+    const sel = $('persona-select');
+    const customOptions = personas.filter(p => !p.builtin)
+      .map(p => `<option value="${p.id}">${p.emoji || '🤖'} ${escHtml(p.name)}</option>`).join('');
+    // Keep the builtin options, just add custom ones
+    const existingValues = [...sel.options].map(o => o.value);
+    personas.filter(p => !p.builtin && !existingValues.includes(p.id)).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = `${p.emoji || '🤖'} ${p.name}`;
+      sel.appendChild(opt);
+    });
+  } catch { }
+}
+
+function selectPersona(id) {
+  $('persona-select').value = id;
+  document.querySelector('[data-tab="chat"]').click();
+  showToast(`تم اختيار شخصية: ${id}`, 'ok');
+}
+
+async function deletePersona(evt, id) {
+  evt.stopPropagation();
+  const r = await fetch(`/api/personas/${id}`, { method: 'DELETE', headers: getAuthHeader() });
+  const data = await r.json();
+  if (data.deleted) { showToast('تم الحذف', 'ok'); loadPersonas(); }
+  else showToast(data.error || 'خطأ', 'err');
+}
+
+$('persona-create-btn').addEventListener('click', async () => {
+  const pid = $('persona-id').value.trim();
+  const name = $('persona-name').value.trim();
+  const emoji = $('persona-emoji').value.trim() || '🤖';
+  const desc = $('persona-desc').value.trim();
+  const system = $('persona-system').value.trim();
+  if (!pid || !name || !system) return showToast('ID واسم وsystem prompt مطلوبة', 'err');
+  const r = await APIJ('/api/personas', { id: pid, name, description: desc, system, emoji });
+  const data = await r.json();
+  $('persona-create-result').textContent = data.id ? `✅ تم إنشاء: ${data.name}` : JSON.stringify(data);
+  if (data.id) { loadPersonas(); $('persona-id').value = ''; $('persona-name').value = ''; $('persona-system').value = ''; }
+});
+
+loadPersonas();
+
+/* ═══════════════════════════════════════
+   TAB 8 — PROMPT TEMPLATES
+═══════════════════════════════════════ */
+$('refresh-templates-btn').addEventListener('click', loadTemplates);
+
+async function loadTemplates() {
+  try {
+    const r = await API('/api/templates');
+    const { templates } = await r.json();
+    const list = $('templates-list');
+    list.innerHTML = templates.map(t => `
+      <div class="template-card">
+        <div class="tmpl-info">
+          <div class="tmpl-name">${escHtml(t.name)}</div>
+          <div class="tmpl-desc">${escHtml(t.description || '')}</div>
+          <div class="tmpl-vars">متغيرات: ${(t.variables || []).map(v => `{{${v}}}`).join(', ')}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn secondary small" onclick="selectTemplate('${t.id}')">استخدام</button>
+          ${t.builtin ? '' : `<button class="btn danger small" onclick="deleteTemplate('${t.id}')">حذف</button>`}
+        </div>
+      </div>`).join('');
+
+    // Populate select
+    const sel = $('template-select');
+    sel.innerHTML = '<option value="">— اختر قالباً —</option>' +
+      templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
+  } catch { }
+}
+
+function selectTemplate(id) {
+  $('template-select').value = id;
+  buildTemplateVarsForm(id);
+}
+
+$('template-select').addEventListener('change', () => {
+  buildTemplateVarsForm($('template-select').value);
+});
+
+async function buildTemplateVarsForm(id) {
+  if (!id) { $('template-vars-form').innerHTML = ''; return; }
+  try {
+    const r = await API(`/api/templates/${id}`);
+    const t = await r.json();
+    $('template-vars-form').innerHTML = (t.variables || []).map(v =>
+      `<div><label style="color:var(--muted);font-size:13px;display:block;margin-bottom:4px">{{${v}}}</label>
+       <input type="text" id="tvar-${v}" placeholder="${v}" /></div>`
+    ).join('');
+  } catch { }
+}
+
+$('template-run-btn').addEventListener('click', async () => {
+  const id = $('template-select').value;
+  if (!id) return showToast('اختر قالباً', 'err');
+  const vars = collectTemplateVars(id);
+  const box = $('template-result');
+  box.textContent = 'جارٍ التنفيذ…';
+  try {
+    const r = await APIJ(`/api/templates/${id}/run`, { variables: vars });
+    const data = await r.json();
+    box.textContent = data.output || data.error || JSON.stringify(data);
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+});
+
+$('template-preview-btn').addEventListener('click', async () => {
+  const id = $('template-select').value;
+  if (!id) return showToast('اختر قالباً', 'err');
+  const vars = collectTemplateVars(id);
+  try {
+    const r = await APIJ(`/api/templates/${id}/render`, { variables: vars });
+    const data = await r.json();
+    $('template-result').textContent = data.rendered || data.error || JSON.stringify(data);
+  } catch (e) { $('template-result').textContent = `خطأ: ${e.message}`; }
+});
+
+function collectTemplateVars(id) {
+  const vars = {};
+  document.querySelectorAll('#template-vars-form input').forEach(inp => {
+    const key = inp.id.replace('tvar-', '');
+    vars[key] = inp.value;
+  });
+  return vars;
+}
+
+$('new-tmpl-btn').addEventListener('click', async () => {
+  const name = $('new-tmpl-name').value.trim();
+  const tmpl = $('new-tmpl-text').value.trim();
+  const desc = $('new-tmpl-desc').value.trim();
+  if (!name || !tmpl) return showToast('الاسم والقالب مطلوبان', 'err');
+  const r = await APIJ('/api/templates', { name, template: tmpl, description: desc });
+  const data = await r.json();
+  $('new-tmpl-result').textContent = data.id ? `✅ تم حفظ: ${data.name}` : JSON.stringify(data);
+  if (data.id) { loadTemplates(); $('new-tmpl-name').value = ''; $('new-tmpl-text').value = ''; }
+});
+
+async function deleteTemplate(id) {
+  const r = await fetch(`/api/templates/${id}`, { method: 'DELETE', headers: getAuthHeader() });
+  const data = await r.json();
+  if (data.deleted) { showToast('تم الحذف', 'ok'); loadTemplates(); }
+  else showToast(data.error || 'خطأ', 'err');
+}
+
+loadTemplates();
+
+/* ═══════════════════════════════════════
+   TAB 9 — BATCH
+═══════════════════════════════════════ */
+$('batch-run-btn').addEventListener('click', async () => {
+  const lines = $('batch-input').value.trim().split('\n').map(l => l.trim()).filter(Boolean);
+  if (!lines.length) return showToast('أدخل المهام', 'err');
+  const box = $('batch-result');
+  const btn = $('batch-run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ جارٍ التنفيذ… <span class="spinner"></span>';
+  box.textContent = `جارٍ تنفيذ ${lines.length} مهمة بالتوازي…`;
+  try {
+    const r = await APIJ('/api/batch', { tasks: lines });
+    const data = await r.json();
+    if (data.error) { box.textContent = `خطأ: ${data.error}`; return; }
+    box.innerHTML = `<strong>✅ ${data.completed} مكتملة | ❌ ${data.failed} فاشلة</strong>\n\n` +
+      data.results.map((res, i) =>
+        `--- مهمة ${i + 1} [${res.status}] ---\n${res.task}\n\n${res.output || res.error || ''}`
+      ).join('\n\n═══════════════════\n\n');
+  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+  finally { btn.disabled = false; btn.textContent = '▶ تشغيل الكل'; }
+});
+
+/* ═══════════════════════════════════════
+   TAB 10 — SCHEDULER
 ═══════════════════════════════════════ */
 $('sched-add-btn').addEventListener('click', async () => {
   const name = $('sched-name').value.trim();
@@ -333,3 +659,44 @@ async function deleteJob(id) {
 }
 
 loadJobs();
+
+/* ═══════════════════════════════════════
+   TAB 11 — MONITORING
+═══════════════════════════════════════ */
+$('refresh-stats-btn').addEventListener('click', loadMonitoring);
+
+async function loadMonitoring() {
+  try {
+    const [statsR, reqR, hourR] = await Promise.all([
+      API('/api/monitoring/stats'),
+      API('/api/monitoring/requests?n=30'),
+      API('/api/monitoring/hourly'),
+    ]);
+    const stats = await statsR.json();
+    const { requests } = await reqR.json();
+    const { hourly } = await hourR.json();
+
+    $('stats-grid').innerHTML = [
+      { label: 'إجمالي الطلبات', value: stats.total_requests },
+      { label: 'رموز الإدخال', value: (stats.total_input_tokens || 0).toLocaleString() },
+      { label: 'رموز الإخراج', value: (stats.total_output_tokens || 0).toLocaleString() },
+      { label: 'التكلفة (USD)', value: `$${(stats.total_cost_usd || 0).toFixed(4)}` },
+      { label: 'الأخطاء', value: stats.errors || 0 },
+    ].map(s => `
+      <div class="stat-card">
+        <div class="stat-value">${escHtml(String(s.value))}</div>
+        <div class="stat-label">${s.label}</div>
+      </div>`).join('');
+
+    $('requests-list').textContent = requests.map(r =>
+      `[${r.ts.slice(11, 19)}] ${r.endpoint} — ${r.input_tokens}↑${r.output_tokens}↓ — $${r.cost_usd} — ${r.latency_ms}ms${r.error ? ' ❌' : ''}`
+    ).join('\n');
+
+    $('hourly-list').textContent = hourly.map(h =>
+      `${h.hour}: ${h.requests} طلب | ${h.tokens} رمز | $${h.cost.toFixed(4)}`
+    ).join('\n') || 'لا توجد بيانات بعد';
+  } catch (e) { $('stats-grid').textContent = `خطأ: ${e.message}`; }
+}
+
+// Load monitoring when its tab is selected
+document.querySelector('[data-tab="monitoring"]').addEventListener('click', loadMonitoring);

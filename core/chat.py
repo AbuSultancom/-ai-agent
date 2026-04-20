@@ -25,7 +25,8 @@ def _get_or_create(session_id: str) -> list[dict]:
         return _sessions[session_id]
 
 
-def chat(message: str, session_id: str = "default", history: list[dict] | None = None) -> str:
+def chat(message: str, session_id: str = "default", history: list[dict] | None = None,
+         system_override: str | None = None) -> str:
     """Send a message and get a reply. Maintains history per session_id."""
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
@@ -35,6 +36,8 @@ def chat(message: str, session_id: str = "default", history: list[dict] | None =
         messages = _get_or_create(session_id)
         messages.append({"role": "user", "content": message})
 
+    system_text = system_override or _CHAT_SYSTEM
+
     try:
         response = client.messages.create(
             model=config.MODEL,
@@ -43,7 +46,7 @@ def chat(message: str, session_id: str = "default", history: list[dict] | None =
             system=[
                 {
                     "type": "text",
-                    "text": _CHAT_SYSTEM,
+                    "text": system_text,
                     "cache_control": {"type": "ephemeral"},
                 }
             ],

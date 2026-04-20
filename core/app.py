@@ -409,5 +409,450 @@ def notify_email():
     return jsonify({"result": result})
 
 
+# ── Vision ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/vision/analyze", methods=["POST"])
+def vision_analyze():
+    from core.vision import VisionEngine
+    engine = VisionEngine()
+    if "image" in request.files:
+        f = request.files["image"]
+        question = request.form.get("question", "")
+        data_bytes = f.read()
+        mime = f.content_type or "image/jpeg"
+        analysis = engine.analyze(data_bytes, mime, question)
+    else:
+        body = request.get_json(silent=True) or {}
+        url = body.get("url", "").strip()
+        question = body.get("question", "")
+        if not url:
+            return jsonify({"error": "Provide 'image' file or 'url' in JSON body"}), 400
+        analysis = engine.analyze_from_url(url, question)
+    return jsonify({"analysis": analysis})
+
+
+@app.route("/api/vision/ocr", methods=["POST"])
+def vision_ocr():
+    if "image" not in request.files:
+        return jsonify({"error": "image file required"}), 400
+    f = request.files["image"]
+    data = f.read()
+    mime = f.content_type or "image/jpeg"
+    from core.vision import VisionEngine
+    text = VisionEngine().extract_text_ocr(data, mime)
+    return jsonify({"text": text})
+
+
+@app.route("/api/vision/compare", methods=["POST"])
+def vision_compare():
+    if "image1" not in request.files or "image2" not in request.files:
+        return jsonify({"error": "image1 and image2 files required"}), 400
+    f1, f2 = request.files["image1"], request.files["image2"]
+    from core.vision import VisionEngine
+    result = VisionEngine().compare_images(
+        f1.read(), f1.content_type or "image/jpeg",
+        f2.read(), f2.content_type or "image/jpeg",
+    )
+    return jsonify({"comparison": result})
+
+
+# ── Data Analysis ─────────────────────────────────────────────────────────────
+
+@app.route("/api/data/upload", methods=["POST"])
+def data_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    from core.data_analysis import DataAnalyst
+    analyst = DataAnalyst()
+    try:
+        dataset = analyst.load_file(f)
+        return jsonify({"summary": dataset.summary(), "columns": dataset.columns,
+                        "rows": len(dataset.rows)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/data/analyze", methods=["POST"])
+def data_analyze():
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    question = request.form.get("question", "")
+    from core.data_analysis import DataAnalyst
+    analyst = DataAnalyst()
+    try:
+        dataset = analyst.load_file(f)
+        answer = analyst.analyze(dataset, question)
+        return jsonify({"answer": answer, "summary": dataset.summary()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/data/chart", methods=["POST"])
+def data_chart():
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    chart_type = request.form.get("chart_type", "auto")
+    x_col = request.form.get("x_col", "")
+    y_col = request.form.get("y_col", "")
+    title = request.form.get("title", "")
+    from core.data_analysis import DataAnalyst
+    analyst = DataAnalyst()
+    try:
+        dataset = analyst.load_file(f)
+        result = analyst.generate_chart(dataset, chart_type, x_col, y_col, title)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/charts/<chart_id>", methods=["GET"])
+def serve_chart(chart_id: str):
+    import re
+    from flask import send_file
+    if not re.fullmatch(r"[a-f0-9]{10}", chart_id):
+        return jsonify({"error": "invalid chart id"}), 400
+    path = os.path.join("data", "charts", f"chart_{chart_id}.png")
+    if not os.path.exists(path):
+        return jsonify({"error": "chart not found"}), 404
+    return send_file(path, mimetype="image/png")
+
+
+# ── Personas ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/personas", methods=["GET"])
+def personas_list():
+    from core.personas import list_personas
+    return jsonify({"personas": list_personas()})
+
+
+@app.route("/api/personas", methods=["POST"])
+def persona_create():
+    data = request.get_json(silent=True) or {}
+    pid = data.get("id", "").strip()
+    name = data.get("name", "").strip()
+    description = data.get("description", "").strip()
+    system = data.get("system", "").strip()
+    emoji = data.get("emoji", "🤖")
+    if not pid or not name or not system:
+        return jsonify({"error": "id, name, and system are required"}), 400
+    from core.personas import create_persona
+    persona = create_persona(pid, name, description, system, emoji)
+    return jsonify(persona), 201
+
+
+@app.route("/api/personas/<persona_id>", methods=["GET"])
+def persona_get(persona_id: str):
+    from core.personas import get_persona
+    p = get_persona(persona_id)
+    if not p:
+        return jsonify({"error": "persona not found"}), 404
+    return jsonify(p)
+
+
+@app.route("/api/personas/<persona_id>", methods=["DELETE"])
+def persona_delete(persona_id: str):
+    from core.personas import delete_persona
+    ok = delete_persona(persona_id)
+    if not ok:
+        return jsonify({"error": "Cannot delete builtin persona or persona not found"}), 400
+    return jsonify({"deleted": persona_id})
+
+
+@app.route("/api/chat/persona", methods=["POST"])
+def chat_with_persona():
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    persona_id = data.get("persona_id", "default")
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    session_id = request.headers.get("X-Session-Id", "default")
+    from core.chat import chat
+    from core.personas import get_system_prompt
+    system = get_system_prompt(persona_id)
+    reply = chat(message, session_id=f"{persona_id}:{session_id}", system_override=system)
+    return jsonify({"reply": reply, "persona_id": persona_id})
+
+
+# ── Batch Tasks ───────────────────────────────────────────────────────────────
+
+@app.route("/api/batch", methods=["POST"])
+def batch_run():
+    data = request.get_json(silent=True) or {}
+    tasks = data.get("tasks", [])
+    if not tasks or not isinstance(tasks, list):
+        return jsonify({"error": "tasks (list) is required"}), 400
+    if len(tasks) > 10:
+        return jsonify({"error": "max 10 tasks per batch"}), 400
+    from core.batch import run_batch
+    result = run_batch([str(t) for t in tasks], max_workers=int(data.get("max_workers", 5)))
+    return jsonify(result)
+
+
+# ── Database ──────────────────────────────────────────────────────────────────
+
+@app.route("/api/db/query", methods=["POST"])
+def db_query():
+    data = request.get_json(silent=True) or {}
+    sql = data.get("sql", "").strip()
+    if not sql:
+        return jsonify({"error": "sql is required"}), 400
+    from tools.db_tools import DBTools
+    db = DBTools(data.get("db_url", ""))
+    result = db.execute(sql, data.get("params"), data.get("db_path", "data/agent.db"))
+    return jsonify(result)
+
+
+@app.route("/api/db/tables", methods=["GET"])
+def db_tables():
+    from tools.db_tools import DBTools
+    db = DBTools()
+    tables = db.list_tables()
+    return jsonify({"tables": tables})
+
+
+@app.route("/api/db/describe/<table>", methods=["GET"])
+def db_describe(table: str):
+    from tools.db_tools import DBTools
+    db = DBTools()
+    return jsonify(db.describe_table(table))
+
+
+# ── Browser Automation ────────────────────────────────────────────────────────
+
+@app.route("/api/browser/screenshot", methods=["POST"])
+def browser_screenshot():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    from tools.browser_tools import BrowserTools
+    bt = BrowserTools()
+    result = bt.screenshot(url, data.get("full_page", True))
+    return jsonify(result)
+
+
+@app.route("/api/browser/text", methods=["POST"])
+def browser_text():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    from tools.browser_tools import BrowserTools
+    text = BrowserTools().get_text(url)
+    return jsonify({"text": text[:10000]})
+
+
+@app.route("/api/browser/links", methods=["POST"])
+def browser_links():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    from tools.browser_tools import BrowserTools
+    links = BrowserTools().extract_links(url)
+    return jsonify({"links": links})
+
+
+@app.route("/api/screenshots/<shot_id>", methods=["GET"])
+def serve_screenshot(shot_id: str):
+    import re
+    from flask import send_file
+    if not re.fullmatch(r"[a-f0-9]{10}", shot_id):
+        return jsonify({"error": "invalid id"}), 400
+    path = os.path.join("data", "screenshots", f"shot_{shot_id}.png")
+    if not os.path.exists(path):
+        return jsonify({"error": "not found"}), 404
+    return send_file(path, mimetype="image/png")
+
+
+# ── API Tester ────────────────────────────────────────────────────────────────
+
+@app.route("/api/test/request", methods=["POST"])
+def api_test_request():
+    data = request.get_json(silent=True) or {}
+    url = data.get("url", "").strip()
+    method = data.get("method", "GET")
+    if not url:
+        return jsonify({"error": "url is required"}), 400
+    from tools.api_tester import APITester
+    tester = APITester()
+    response = tester.request(method, url, data.get("headers"), data.get("body"))
+    analysis = tester.analyze_response(
+        {"method": method, "url": url}, response, data.get("expectations", "")
+    )
+    return jsonify({"response": response, "analysis": analysis})
+
+
+@app.route("/api/test/suite", methods=["POST"])
+def api_test_suite():
+    data = request.get_json(silent=True) or {}
+    tests = data.get("tests", [])
+    if not tests:
+        return jsonify({"error": "tests list is required"}), 400
+    from tools.api_tester import APITester
+    results = APITester().run_test_suite(tests)
+    passed = sum(1 for r in results if r["passed"])
+    return jsonify({"total": len(results), "passed": passed,
+                    "failed": len(results) - passed, "results": results})
+
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+
+@app.route("/api/docker/<action>", methods=["POST"])
+def docker_action(action: str):
+    data = request.get_json(silent=True) or {}
+    from tools.docker_tools import DockerTools
+    dt = DockerTools()
+    allowed = {
+        "containers": lambda: dt.list_containers(data.get("all", False)),
+        "images": lambda: dt.list_images(),
+        "pull": lambda: dt.pull(data["image"]),
+        "run": lambda: dt.run_container(
+            data["image"], data.get("command", ""),
+            data.get("ports"), data.get("env"),
+            data.get("detach", True), data.get("remove", False),
+        ),
+        "stop": lambda: dt.stop(data["container_id"]),
+        "remove": lambda: dt.remove(data["container_id"], data.get("force", False)),
+        "logs": lambda: dt.logs(data["container_id"], data.get("tail", 100)),
+        "stats": lambda: dt.stats(data["container_id"]),
+        "exec": lambda: dt.exec_cmd(data["container_id"], data["command"]),
+        "inspect": lambda: dt.inspect(data["container_id"]),
+    }
+    if action not in allowed:
+        return jsonify({"error": f"Unknown action '{action}'"}), 400
+    try:
+        result = allowed[action]()
+        return jsonify(result)
+    except KeyError as e:
+        return jsonify({"error": f"Missing parameter: {e}"}), 400
+
+
+# ── Monitoring ────────────────────────────────────────────────────────────────
+
+@app.route("/api/monitoring/stats", methods=["GET"])
+def monitoring_stats():
+    from core.monitoring import get_stats
+    return jsonify(get_stats())
+
+
+@app.route("/api/monitoring/requests", methods=["GET"])
+def monitoring_requests():
+    n = int(request.args.get("n", 50))
+    from core.monitoring import get_recent_requests
+    return jsonify({"requests": get_recent_requests(n)})
+
+
+@app.route("/api/monitoring/hourly", methods=["GET"])
+def monitoring_hourly():
+    from core.monitoring import get_hourly_summary
+    return jsonify({"hourly": get_hourly_summary()})
+
+
+# ── Prompt Templates ──────────────────────────────────────────────────────────
+
+@app.route("/api/templates", methods=["GET"])
+def templates_list():
+    from core.prompt_templates import list_templates
+    return jsonify({"templates": list_templates()})
+
+
+@app.route("/api/templates", methods=["POST"])
+def template_create():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    template = data.get("template", "").strip()
+    if not name or not template:
+        return jsonify({"error": "name and template are required"}), 400
+    from core.prompt_templates import create_template
+    rec = create_template(name, template, data.get("description", ""),
+                           data.get("id"))
+    return jsonify(rec), 201
+
+
+@app.route("/api/templates/<template_id>", methods=["GET"])
+def template_get(template_id: str):
+    from core.prompt_templates import get_template
+    t = get_template(template_id)
+    if not t:
+        return jsonify({"error": "template not found"}), 404
+    return jsonify(t)
+
+
+@app.route("/api/templates/<template_id>", methods=["DELETE"])
+def template_delete(template_id: str):
+    from core.prompt_templates import delete_template
+    ok = delete_template(template_id)
+    if not ok:
+        return jsonify({"error": "Cannot delete builtin template or not found"}), 400
+    return jsonify({"deleted": template_id})
+
+
+@app.route("/api/templates/<template_id>/render", methods=["POST"])
+def template_render(template_id: str):
+    data = request.get_json(silent=True) or {}
+    variables = data.get("variables", {})
+    from core.prompt_templates import render_template
+    try:
+        rendered = render_template(template_id, variables)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"rendered": rendered})
+
+
+@app.route("/api/templates/<template_id>/run", methods=["POST"])
+def template_run(template_id: str):
+    data = request.get_json(silent=True) or {}
+    variables = data.get("variables", {})
+    from core.prompt_templates import render_template
+    try:
+        prompt = render_template(template_id, variables)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    from core.orchestrator import AIOrchestrator
+    output = AIOrchestrator().run_task_sync(prompt)
+    return jsonify({"output": output, "prompt": prompt})
+
+
+# ── Slack / Discord ───────────────────────────────────────────────────────────
+
+@app.route("/api/notify/slack", methods=["POST"])
+def notify_slack():
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    from core.integrations import send_slack_message
+    result = send_slack_message(text, data.get("channel", ""),
+                                 data.get("webhook_url", ""))
+    return jsonify(result)
+
+
+@app.route("/api/notify/discord", methods=["POST"])
+def notify_discord():
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    from core.integrations import send_discord_message
+    result = send_discord_message(text, data.get("webhook_url", ""),
+                                   data.get("username", "AI Agent"))
+    return jsonify(result)
+
+
+@app.route("/api/notify/all", methods=["POST"])
+def notify_all():
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+    from core.integrations import notify
+    result = notify(message, data.get("channels"))
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

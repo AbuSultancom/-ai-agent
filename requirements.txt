@@ -3,6 +3,7 @@ anthropic>=0.92.0
 
 # Web framework
 flask>=3.0.0
+flask-limiter>=3.5.0
 
 # Config
 python-dotenv>=1.0.0
@@ -26,3 +27,14 @@ apscheduler>=3.10.0
 
 # Data validation
 pydantic>=2.0.0
+
+# Data analysis & charts
+matplotlib>=3.8.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+
+# Excel parsing
+xlrd>=2.0.0
+
+# Notifications
+slack-sdk>=3.27.0
