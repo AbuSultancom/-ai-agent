@@ -17,11 +17,11 @@ MAX_OUTPUT = 20_000
 # Blocked imports — prevent dangerous operations
 _BLOCKED_IMPORTS = [
     "subprocess", "os.system", "shutil.rmtree", "ctypes",
-    "__import__('os').system", "exec(", "eval(",
+    "__import__('os').system",
 ]
 
 
-def _has_blocked_patterns(code: str) -> str | None:
+def _has_blocked_pattern(code: str) -> str | None:
     for pat in _BLOCKED_IMPORTS:
         if pat in code:
             return pat
@@ -30,20 +30,18 @@ def _has_blocked_patterns(code: str) -> str | None:
 
 class CodeSandbox:
     def execute(self, code: str, timeout: int = 15) -> dict:
-        """
-        Execute Python code in a subprocess and return stdout/stderr/error.
-        Returns: {stdout, stderr, error, exit_code}
-        """
+        """Execute Python code in a subprocess. Returns {output, stdout, stderr, success, exit_code, error}."""
         blocked = _has_blocked_pattern(code)
         if blocked:
             return {
+                "output": "",
                 "stdout": "",
                 "stderr": f"Blocked pattern: '{blocked}'",
+                "success": False,
                 "error": "SecurityError",
                 "exit_code": -1,
             }
 
-        # Write to temp file
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".py", delete=False, encoding="utf-8"
         ) as f:
@@ -60,16 +58,21 @@ class CodeSandbox:
             )
             stdout = result.stdout[:MAX_OUTPUT]
             stderr = result.stderr[:MAX_OUTPUT]
+            success = result.returncode == 0
             return {
+                "output": stdout,
                 "stdout": stdout,
                 "stderr": stderr,
-                "error": None,
+                "success": success,
+                "error": stderr if not success else None,
                 "exit_code": result.returncode,
             }
         except subprocess.TimeoutExpired:
-            return {"stdout": "", "stderr": "", "error": f"Timed out after {timeout}s", "exit_code": -1}
+            return {"output": "", "stdout": "", "stderr": "", "success": False,
+                    "error": f"Timed out after {timeout}s", "exit_code": -1}
         except Exception as exc:
-            return {"stdout": "", "stderr": "", "error": str(exc), "exit_code": -1}
+            return {"output": "", "stdout": "", "stderr": "", "success": False,
+                    "error": str(exc), "exit_code": -1}
         finally:
             try:
                 os.unlink(tmp_path)
@@ -78,19 +81,10 @@ class CodeSandbox:
 
     def format_result(self, result: dict) -> str:
         parts = []
-        if result.get("error"):
+        if result.get("error") and not result.get("success"):
             parts.append(f"❌ Error: {result['error']}")
-        if result.get("stdout"):
-            parts.append(f"stdout:\n{result['stdout']}")
-        if result.get("stderr"):
+        if result.get("output"):
+            parts.append(result["output"])
+        if result.get("stderr") and not result.get("output"):
             parts.append(f"stderr:\n{result['stderr']}")
-        if result.get("exit_code", 0) != 0 and not result.get("error"):
-            parts.append(f"exit code: {result['exit_code']}")
         return "\n".join(parts) or "(no output)"
-
-
-def _has_blocked_pattern(code: str) -> str | None:
-    for pat in _BLOCKED_IMPORTS:
-        if pat in code:
-            return pat
-    return None

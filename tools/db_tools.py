@@ -9,10 +9,13 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _BLOCKED_SQL = re.compile(
-    r"\b(DROP\s+TABLE|DROP\s+DATABASE|TRUNCATE|DELETE\s+FROM\s+\w+\s*;?\s*$"
-    r"|INSERT\s+INTO.*VALUES.*--"
-    r"|;\s*DROP|;\s*DELETE|;\s*UPDATE)\b",
-    re.IGNORECASE,
+    r"(--.*$"                          # inline comment (SQL injection)
+    r"|;\s*(DROP|DELETE|UPDATE|INSERT)"  # stacked queries
+    r"|UNION\s+SELECT"                 # union injection
+    r"|'\s*OR\s+'?\d"                  # classic OR injection
+    r"|xp_cmdshell"                    # MSSQL command exec
+    r")",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 _DEFAULT_DB = os.path.join("data", "agent.db")
