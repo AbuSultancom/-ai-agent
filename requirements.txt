@@ -1,9 +1,40 @@
-Flask==2.3.3
-LangGraph==0.0.1
-playwright==1.40.0
-chromadb==0.4.14
-ollama==0.0.1
-pydantic==2.0.0
-python-dotenv==1.0.0
-requests==2.31.0
-langchain==0.1.0
+# Core LLM
+anthropic>=0.92.0
+
+# Web framework
+flask>=3.0.0
+flask-limiter>=3.5.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Memory / Vector DB
+chromadb>=0.5.0
+
+# Web tools
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Browser automation (optional — for screenshots)
+playwright>=1.40.0
+
+# PDF parsing (optional — for RAG)
+pdfplumber>=0.10.0
+pypdf>=4.0.0
+
+# Task scheduling
+apscheduler>=3.10.0
+
+# Data validation
+pydantic>=2.0.0
+
+# Data analysis & charts
+matplotlib>=3.8.0
+openpyxl>=3.1.0
+pandas>=2.0.0
+
+# Excel parsing
+xlrd>=2.0.0
+
+# Notifications
+slack-sdk>=3.27.0

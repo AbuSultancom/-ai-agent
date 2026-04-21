@@ -1,25 +1,30 @@
-# Dockerfile
+FROM python:3.11-slim
 
-# Use Python 3.10-slim as base image
-FROM python:3.10-slim
-
-# Set the working directory
 WORKDIR /app
 
-# Copy requirements.txt file
-COPY requirements.txt .
+# System deps for Playwright and ChromaDB
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl wget gnupg ca-certificates \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
+    libasound2 libx11-6 libxext6 libxss1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Install Python deps
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the Flask app code
+# Install Playwright browser
+RUN playwright install chromium --with-deps || true
+
+# Copy project
 COPY . .
 
-# Set the Flask application environment variable
-ENV FLASK_APP=app.py
+# Create data directory for ChromaDB
+RUN mkdir -p /app/data/chromadb
 
-# Expose the default Flask port
+ENV FLASK_APP=core/app.py
+ENV PYTHONPATH=/app
 EXPOSE 5000
 
-# Command to run the application
-CMD ["flask", "run", "--host=0.0.0.0"]
+CMD ["python", "orchestrator.py", "serve"]
