@@ -601,7 +601,10 @@ def db_query():
         return jsonify({"error": "sql is required"}), 400
     from tools.db_tools import DBTools
     db = DBTools(data.get("db_url", ""))
-    result = db.execute(sql, data.get("params"), data.get("db_path", "data/agent.db"))
+    try:
+        result = db.execute(sql, data.get("params"), data.get("db_path", "data/agent.db"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     return jsonify(result)
 
 
