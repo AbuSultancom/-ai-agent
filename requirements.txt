@@ -38,3 +38,13 @@ xlrd>=2.0.0
 
 # Notifications
 slack-sdk>=3.27.0
+
+# System resource monitoring (desktop notifications + resource monitor)
+psutil>=5.9.0
+
+# Voice interface — Whisper STT (install separately if needed)
+# openai-whisper>=20231117   # uncomment to install Whisper
+# pyttsx3>=2.90              # optional TTS engine
+
+# RSS feed parsing (morning briefing)
+lxml>=4.9.0

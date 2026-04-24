@@ -419,3 +419,34 @@ select:focus { border-color: var(--accent); }
   max-width: 180px;
 }
 #global-model-select:focus { border-color: var(--accent); }
+
+/* AGENT CARDS */
+.agent-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+.agent-card .a-emoji { font-size: 28px; margin-bottom: 6px; }
+.agent-card .a-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: var(--accent); }
+.agent-card .a-desc { color: var(--muted); font-size: 12px; }
+
+/* AGENT OUTPUT — preserves newlines + colors phase headers */
+#agent-output { white-space: pre-wrap; direction: ltr; text-align: left; }
+
+/* RESOURCE CARDS */
+.resource-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+.resource-card .res-value { font-size: 22px; font-weight: 700; color: var(--accent2); }
+.resource-card .res-label { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.resource-card.warn .res-value { color: var(--warn); }
+.resource-card.err  .res-value { color: var(--err); }
+
+/* VOICE UPLOAD */
+#voice-upload-area { margin-bottom: 0; }

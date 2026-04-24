@@ -22,6 +22,9 @@
       <button class="tab-btn" data-tab="scheduler">Scheduler</button>
       <button class="tab-btn" data-tab="models">Models</button>
       <button class="tab-btn" data-tab="monitoring">Monitoring</button>
+      <button class="tab-btn" data-tab="agents">🤝 Agents</button>
+      <button class="tab-btn" data-tab="voice">🎙️ Voice</button>
+      <button class="tab-btn" data-tab="automation">⚙️ Automation</button>
     </div>
     <div class="nav-right">
       <select id="global-model-select" title="Active model"></select>
@@ -310,6 +313,118 @@
     <div class="panel">
       <h2>📈 Hourly Summary</h2>
       <div id="hourly-list" class="output-box" style="max-height:300px;overflow-y:auto"></div>
+    </div>
+  </section>
+
+  <!-- MULTI-AGENT SYSTEM TAB -->
+  <section id="tab-agents" class="tab-content">
+    <div class="panel">
+      <h2>🤝 Agent Team</h2>
+      <div id="agents-grid" class="personas-grid"></div>
+    </div>
+    <div class="panel">
+      <h2>🧠 Run Multi-Agent Task</h2>
+      <p class="hint">Agents collaborate, debate, and synthesize the optimal answer together.</p>
+      <textarea id="agent-task-input" placeholder="Describe a complex task for the agent team… e.g. Design a secure REST API for user authentication" rows="4"></textarea>
+      <div class="btn-row">
+        <select id="agent-mode-select" style="width:auto;margin-bottom:0">
+          <option value="auto">Auto (smart routing)</option>
+          <option value="debate">Debate (full discussion)</option>
+          <option value="parallel">Parallel (all at once)</option>
+        </select>
+        <button id="agent-run-btn" class="btn primary">▶ Run Team</button>
+      </div>
+      <div id="agent-output" class="output-box" style="min-height:160px"></div>
+    </div>
+    <div class="panel">
+      <h2>📜 Team History</h2>
+      <button id="refresh-agent-history-btn" class="btn secondary small">↻ Refresh</button>
+      <div id="agent-history" class="tasks-list"></div>
+    </div>
+  </section>
+
+  <!-- VOICE TAB -->
+  <section id="tab-voice" class="tab-content">
+    <div class="panel">
+      <h2>🎙️ Voice Input (Whisper)</h2>
+      <div id="voice-status" class="hint"></div>
+      <div class="upload-area" id="voice-upload-area">
+        <span>Drop an audio file here or <label for="voice-file-input" class="link">browse</label></span>
+        <input id="voice-file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" style="display:none" />
+      </div>
+      <div class="input-row" style="margin-top:10px">
+        <select id="voice-model-select" style="width:auto;margin-bottom:0;flex:0 0 auto">
+          <option value="tiny">tiny (fastest)</option>
+          <option value="base" selected>base (balanced)</option>
+          <option value="small">small (better)</option>
+          <option value="medium">medium (accurate)</option>
+        </select>
+        <input id="voice-language" type="text" placeholder="Language code (auto-detect if empty)" style="margin-bottom:0;flex:1" />
+      </div>
+      <div class="btn-row">
+        <button id="voice-transcribe-btn" class="btn primary">Transcribe</button>
+        <button id="voice-run-btn" class="btn secondary">Transcribe &amp; Run as Task</button>
+      </div>
+      <div id="voice-result" class="output-box"></div>
+    </div>
+    <div class="panel">
+      <h2>🎤 Record (Browser)</h2>
+      <p class="hint">Record directly from your microphone and transcribe.</p>
+      <div class="btn-row">
+        <button id="voice-record-btn" class="btn primary">⏺ Start Recording</button>
+        <button id="voice-stop-btn" class="btn secondary" disabled>⏹ Stop</button>
+      </div>
+      <audio id="voice-playback" controls style="width:100%;margin-bottom:12px;display:none"></audio>
+      <div id="voice-record-result" class="output-box" style="min-height:60px"></div>
+    </div>
+  </section>
+
+  <!-- AUTOMATION TAB -->
+  <section id="tab-automation" class="tab-content">
+    <div class="panel">
+      <h2>🌅 Morning Briefing</h2>
+      <p class="hint">Fetches tech news and generates a personalized daily briefing with AI.</p>
+      <input id="briefing-note" type="text" placeholder="Custom note for today (optional)…" />
+      <button id="briefing-btn" class="btn primary">Generate Briefing</button>
+      <div id="briefing-result" class="output-box" style="min-height:120px"></div>
+    </div>
+    <div class="panel">
+      <h2>💻 System Resources</h2>
+      <button id="refresh-resources-btn" class="btn secondary small">↻ Refresh</button>
+      <button id="monitor-start-btn" class="btn secondary small">▶ Start Monitor</button>
+      <button id="monitor-stop-btn" class="btn secondary small">⏹ Stop Monitor</button>
+      <div id="monitor-status" class="hint" style="margin-top:8px"></div>
+      <div id="resources-grid" class="stats-grid" style="margin-top:12px"></div>
+      <div id="top-processes" class="output-box" style="min-height:80px;margin-top:12px"></div>
+    </div>
+    <div class="panel">
+      <h2>🧹 System Maintenance</h2>
+      <p class="hint">Clean temporary files and old logs. Use Dry Run first to preview changes.</p>
+      <div class="btn-row">
+        <select id="maintenance-action" style="width:auto;margin-bottom:0">
+          <option value="all">All maintenance</option>
+          <option value="temp">Temp files only</option>
+          <option value="logs">Old logs only</option>
+          <option value="disk">Disk report only</option>
+        </select>
+        <button id="maintenance-dry-btn" class="btn secondary">Dry Run (Preview)</button>
+        <button id="maintenance-run-btn" class="btn danger">Run Cleanup</button>
+      </div>
+      <div id="maintenance-result" class="output-box" style="min-height:80px"></div>
+    </div>
+    <div class="panel">
+      <h2>🔔 Desktop Notification</h2>
+      <input id="notif-title" type="text" placeholder="Title" />
+      <input id="notif-body" type="text" placeholder="Message body…" />
+      <div class="input-row">
+        <select id="notif-urgency" style="width:auto;margin-bottom:0">
+          <option value="low">Low</option>
+          <option value="normal" selected>Normal</option>
+          <option value="critical">Critical</option>
+        </select>
+        <button id="notif-send-btn" class="btn primary">Send Notification</button>
+      </div>
+      <div id="notif-result" class="output-box" style="min-height:40px"></div>
     </div>
   </section>
 

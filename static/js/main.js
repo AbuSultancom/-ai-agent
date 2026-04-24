@@ -886,3 +886,322 @@ async function loadMonitoring() {
     ).join('\n') || 'No data yet';
   } catch (e) { $('stats-grid').textContent = `Error: ${e.message}`; }
 }
+
+/* ═══════════════════════════════════════
+   TAB — MULTI-AGENT SYSTEM
+═══════════════════════════════════════ */
+async function loadAgentsGrid() {
+  try {
+    const r = await API('/api/agents');
+    const { agents } = await r.json();
+    $('agents-grid').innerHTML = agents.map(a => `
+      <div class="agent-card">
+        <div class="a-emoji">${a.emoji || '🤖'}</div>
+        <div class="a-name">${escHtml(a.name)}</div>
+        <div class="a-desc">${escHtml(a.description)}</div>
+      </div>`).join('');
+  } catch { }
+}
+
+async function loadAgentHistory() {
+  try {
+    const r = await API('/api/agents/history');
+    const { history } = await r.json();
+    const list = $('agent-history');
+    if (!history.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No team runs yet</p>'; return; }
+    list.innerHTML = history.map(h => `
+      <div class="task-card">
+        <div class="task-head">
+          <span class="task-text">${escHtml(h.task)}</span>
+          <span class="task-time">${h.ts}</span>
+          <span class="badge running">${h.mode}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px;margin-top:4px">
+          Agents: ${h.agents.join(', ')}
+        </div>
+      </div>`).join('');
+  } catch { }
+}
+
+$('agent-run-btn').addEventListener('click', async () => {
+  const task = $('agent-task-input').value.trim();
+  const mode = $('agent-mode-select').value;
+  if (!task) return showToast('Enter a task', 'err');
+
+  const btn = $('agent-run-btn');
+  const box = $('agent-output');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Team working… <span class="spinner"></span>';
+  box.textContent = '';
+
+  try {
+    const res = await fetch('/api/agents/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ task, mode }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      box.textContent = `Error: ${err.error || res.statusText}`;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const text = line.slice(6).replace(/\\n/g, '\n');
+          box.textContent += text;
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    }
+    loadAgentHistory();
+    showToast('✅ Team task complete', 'ok');
+  } catch (e) {
+    box.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Team';
+  }
+});
+
+$('refresh-agent-history-btn').addEventListener('click', loadAgentHistory);
+
+document.querySelector('[data-tab="agents"]').addEventListener('click', () => {
+  loadAgentsGrid();
+  loadAgentHistory();
+});
+
+/* ═══════════════════════════════════════
+   TAB — VOICE
+═══════════════════════════════════════ */
+let voiceAudioBlob = null;
+let voiceMediaRecorder = null;
+let voiceChunks = [];
+
+async function checkVoiceStatus() {
+  try {
+    const r = await API('/api/voice/status');
+    const data = await r.json();
+    $('voice-status').textContent = data.whisper_available
+      ? `✅ Whisper available — models: ${data.models.join(', ')}`
+      : '⚠️ Whisper not installed. Run: pip install openai-whisper';
+  } catch (e) {
+    $('voice-status').textContent = `Status check failed: ${e.message}`;
+  }
+}
+
+const voiceArea = $('voice-upload-area');
+const voiceFileInput = $('voice-file-input');
+voiceArea.addEventListener('click', () => voiceFileInput.click());
+voiceArea.addEventListener('dragover', e => { e.preventDefault(); voiceArea.classList.add('dragover'); });
+voiceArea.addEventListener('dragleave', () => voiceArea.classList.remove('dragover'));
+voiceArea.addEventListener('drop', e => {
+  e.preventDefault();
+  voiceArea.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) {
+    voiceAudioBlob = e.dataTransfer.files[0];
+    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
+  }
+});
+voiceFileInput.addEventListener('change', () => {
+  if (voiceFileInput.files[0]) {
+    voiceAudioBlob = voiceFileInput.files[0];
+    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
+  }
+});
+
+async function _doTranscribe(runAsTask = false) {
+  if (!voiceAudioBlob) return showToast('Select or record an audio file first', 'err');
+  const box = runAsTask ? $('voice-result') : $('voice-result');
+  box.textContent = 'Transcribing…';
+
+  const fd = new FormData();
+  fd.append('audio', voiceAudioBlob, voiceAudioBlob.name || 'audio.wav');
+  const lang = $('voice-language').value.trim();
+  if (lang) fd.append('language', lang);
+  fd.append('model', $('voice-model-select').value);
+
+  const endpoint = runAsTask ? '/api/voice/transcribe-and-run' : '/api/voice/transcribe';
+  try {
+    const r = await fetch(endpoint, { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+
+    if (runAsTask) {
+      box.textContent = `[Transcription] ${data.transcription?.text || ''}\n\n[Task Output]\n${data.output || ''}`;
+    } else {
+      const segs = (data.segments || []).map(s =>
+        `[${s.start.toFixed(1)}s → ${s.end.toFixed(1)}s] ${s.text}`).join('\n');
+      box.textContent = `Language: ${data.language || 'auto'}\n\n${data.text}\n\n${segs ? 'Segments:\n' + segs : ''}`;
+    }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+}
+
+$('voice-transcribe-btn').addEventListener('click', () => _doTranscribe(false));
+$('voice-run-btn').addEventListener('click', () => _doTranscribe(true));
+
+// Browser microphone recording
+$('voice-record-btn').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceChunks = [];
+    voiceMediaRecorder = new MediaRecorder(stream);
+    voiceMediaRecorder.ondataavailable = e => voiceChunks.push(e.data);
+    voiceMediaRecorder.onstop = () => {
+      const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+      voiceAudioBlob = new File([blob], 'recording.webm', { type: 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+      const playback = $('voice-playback');
+      playback.src = url;
+      playback.style.display = 'block';
+      $('voice-record-result').textContent = '✅ Recording ready — click Transcribe above';
+      stream.getTracks().forEach(t => t.stop());
+    };
+    voiceMediaRecorder.start();
+    $('voice-record-btn').disabled = true;
+    $('voice-stop-btn').disabled = false;
+    $('voice-record-result').textContent = '⏺ Recording…';
+  } catch (e) {
+    showToast(`Microphone access denied: ${e.message}`, 'err');
+  }
+});
+
+$('voice-stop-btn').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
+    voiceMediaRecorder.stop();
+    $('voice-record-btn').disabled = false;
+    $('voice-stop-btn').disabled = true;
+  }
+});
+
+document.querySelector('[data-tab="voice"]').addEventListener('click', checkVoiceStatus);
+
+/* ═══════════════════════════════════════
+   TAB — AUTOMATION
+═══════════════════════════════════════ */
+$('briefing-btn').addEventListener('click', async () => {
+  const btn = $('briefing-btn');
+  const box = $('briefing-result');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Generating… <span class="spinner"></span>';
+  box.textContent = 'Fetching news and generating briefing…';
+  try {
+    const note = $('briefing-note').value.trim();
+    const r = await APIJ('/api/automation/briefing', { note });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+    box.textContent = `${data.briefing}\n\n[Generated: ${data.generated_at}]`;
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+  finally { btn.disabled = false; btn.textContent = 'Generate Briefing'; }
+});
+
+async function loadResources() {
+  try {
+    const r = await API('/api/system/resources');
+    const d = await r.json();
+
+    const cards = [
+      { label: 'CPU', value: `${d.cpu_percent}%`, warn: d.cpu_percent > 75, err: d.cpu_percent > 90 },
+      { label: 'RAM', value: `${d.memory_percent}%`, warn: d.memory_percent > 75, err: d.memory_percent > 90 },
+      { label: 'Disk', value: `${d.disk_percent}%`, warn: d.disk_percent > 80, err: d.disk_percent > 90 },
+      { label: 'RAM Used', value: `${d.memory_used_gb} GB` },
+      { label: 'Disk Used', value: `${d.disk_used_gb} GB` },
+      { label: 'Net ↑', value: `${d.net_sent_mb} MB` },
+    ];
+
+    $('resources-grid').innerHTML = cards.map(c => `
+      <div class="resource-card${c.err ? ' err' : c.warn ? ' warn' : ''}">
+        <div class="res-value">${c.value}</div>
+        <div class="res-label">${c.label}</div>
+      </div>`).join('');
+
+    $('top-processes').textContent = 'Top processes:\n' +
+      (d.top_processes || []).map(p =>
+        `${p.name.padEnd(18)} CPU: ${String(p.cpu).padStart(5)}%  MEM: ${String(p.mem).padStart(5)}%  PID: ${p.pid}`
+      ).join('\n');
+  } catch (e) { $('resources-grid').textContent = `Error: ${e.message}`; }
+}
+
+async function updateMonitorStatus() {
+  try {
+    const r = await API('/api/system/monitor');
+    const d = await r.json();
+    $('monitor-status').textContent =
+      d.running
+        ? `✅ Monitor running (every ${d.interval_s}s) | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`
+        : `⏹ Monitor stopped | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`;
+  } catch { }
+}
+
+$('refresh-resources-btn').addEventListener('click', loadResources);
+
+$('monitor-start-btn').addEventListener('click', async () => {
+  await APIJ('/api/system/monitor/start', { interval_s: 60 });
+  updateMonitorStatus();
+  showToast('Resource monitor started', 'ok');
+});
+
+$('monitor-stop-btn').addEventListener('click', async () => {
+  await APIJ('/api/system/monitor/stop', {});
+  updateMonitorStatus();
+  showToast('Monitor stopped', 'ok');
+});
+
+async function runMaintenance(dryRun) {
+  const action = $('maintenance-action').value;
+  const box = $('maintenance-result');
+  box.textContent = dryRun ? 'Running dry run…' : 'Running cleanup…';
+  try {
+    const r = await APIJ('/api/automation/maintenance', { action, dry_run: dryRun });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+
+    const lines = [];
+    const addSection = (title, result) => {
+      if (!result) return;
+      lines.push(`── ${title} ──`);
+      if (result.removed_count !== undefined)
+        lines.push(`Removed: ${result.removed_count} items (${result.total_freed_mb} MB freed)`);
+      if (result.root)
+        lines.push(`Disk: ${result.root.used_gb}/${result.root.total_gb} GB (${result.root.percent}%)`);
+      if (result.error) lines.push(`Error: ${result.error}`);
+    };
+
+    if (data.temp_cleanup) addSection('Temp Files', data.temp_cleanup);
+    if (data.log_cleanup) addSection('Old Logs', data.log_cleanup);
+    if (data.disk_report) addSection('Disk Report', data.disk_report);
+    if (data.removed_count !== undefined) addSection(action, data);
+
+    box.textContent = lines.join('\n') || JSON.stringify(data, null, 2);
+    if (!dryRun) showToast('✅ Maintenance complete', 'ok');
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+}
+
+$('maintenance-dry-btn').addEventListener('click', () => runMaintenance(true));
+$('maintenance-run-btn').addEventListener('click', () => runMaintenance(false));
+
+$('notif-send-btn').addEventListener('click', async () => {
+  const title = $('notif-title').value.trim() || 'AI Agent';
+  const body = $('notif-body').value.trim();
+  if (!body) return showToast('Enter notification body', 'err');
+  const urgency = $('notif-urgency').value;
+  try {
+    const r = await APIJ('/api/system/notify', { title, body, urgency });
+    const data = await r.json();
+    $('notif-result').textContent = data.sent
+      ? `✅ Notification sent: "${title}" — ${body}`
+      : `⚠️ notify-send not available (logged instead)`;
+  } catch (e) { $('notif-result').textContent = `Error: ${e.message}`; }
+});
+
+document.querySelector('[data-tab="automation"]').addEventListener('click', () => {
+  loadResources();
+  updateMonitorStatus();
+});

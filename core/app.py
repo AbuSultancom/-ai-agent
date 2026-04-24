@@ -909,5 +909,209 @@ def notify_all():
     return jsonify(result)
 
 
+# ── Multi-Agent System ────────────────────────────────────────────────────────
+
+@app.route("/api/agents", methods=["GET"])
+def agents_list():
+    from agents.coordinator import get_coordinator
+    return jsonify({"agents": get_coordinator().get_agents_info()})
+
+
+@app.route("/api/agents/run", methods=["POST"])
+def agents_run():
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", "").strip()
+    mode = data.get("mode", "auto")   # auto | debate | parallel
+    if not task:
+        return jsonify({"error": "task is required"}), 400
+    if mode not in ("auto", "debate", "parallel"):
+        return jsonify({"error": "mode must be auto, debate, or parallel"}), 400
+    from agents.coordinator import get_coordinator
+    try:
+        result = get_coordinator().run(task, mode=mode)
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("Multi-agent run failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/agents/stream", methods=["POST"])
+def agents_stream():
+    data = request.get_json(silent=True) or {}
+    task = data.get("task", "").strip()
+    mode = data.get("mode", "auto")
+    if not task:
+        return jsonify({"error": "task is required"}), 400
+
+    def generate():
+        from agents.coordinator import get_coordinator
+        try:
+            for chunk in get_coordinator().stream_run(task, mode=mode):
+                escaped = chunk.replace("\n", "\\n")
+                yield f"data: {escaped}\n\n"
+        except Exception as e:
+            yield f"data: [error: {e}]\n\n"
+        yield "event: done\ndata: completed\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/api/agents/history", methods=["GET"])
+def agents_history():
+    from agents.coordinator import get_coordinator
+    return jsonify({"history": get_coordinator().get_history()})
+
+
+# ── System Resources & Desktop Notifications ──────────────────────────────────
+
+@app.route("/api/system/resources", methods=["GET"])
+def system_resources():
+    from tools.notify_tools import get_system_resources
+    return jsonify(get_system_resources())
+
+
+@app.route("/api/system/check", methods=["GET"])
+def system_check():
+    from tools.notify_tools import check_and_alert
+    return jsonify(check_and_alert())
+
+
+@app.route("/api/system/notify", methods=["POST"])
+def system_notify():
+    data = request.get_json(silent=True) or {}
+    title = data.get("title", "AI Agent").strip()
+    body = data.get("body", "").strip()
+    urgency = data.get("urgency", "normal")
+    if not body:
+        return jsonify({"error": "body is required"}), 400
+    from tools.notify_tools import send_notification
+    sent = send_notification(title, body, urgency=urgency)
+    return jsonify({"sent": sent, "title": title, "body": body})
+
+
+@app.route("/api/system/monitor", methods=["GET"])
+def system_monitor_status():
+    from tools.notify_tools import monitor_status
+    return jsonify(monitor_status())
+
+
+@app.route("/api/system/monitor/start", methods=["POST"])
+def system_monitor_start():
+    data = request.get_json(silent=True) or {}
+    interval = int(data.get("interval_s", 60))
+    from tools.notify_tools import start_monitor
+    started = start_monitor(interval_s=interval)
+    return jsonify({"started": started, "interval_s": interval})
+
+
+@app.route("/api/system/monitor/stop", methods=["POST"])
+def system_monitor_stop():
+    from tools.notify_tools import stop_monitor
+    stopped = stop_monitor()
+    return jsonify({"stopped": stopped})
+
+
+# ── Automation: Morning Briefing & Maintenance ────────────────────────────────
+
+@app.route("/api/automation/briefing", methods=["GET", "POST"])
+def automation_briefing():
+    data = request.get_json(silent=True) or {}
+    note = data.get("note", "") if request.method == "POST" else ""
+    try:
+        from automation.briefing import generate_briefing
+        result = generate_briefing(custom_note=note)
+        return jsonify(result)
+    except Exception as e:
+        logger.exception("Briefing generation failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/automation/maintenance", methods=["POST"])
+def automation_maintenance():
+    data = request.get_json(silent=True) or {}
+    dry_run = bool(data.get("dry_run", True))
+    action = data.get("action", "all")   # all | temp | logs | disk
+    try:
+        from automation.maintenance import (
+            clean_temp_files, clean_old_logs, disk_report, run_all_maintenance
+        )
+        if action == "temp":
+            result = clean_temp_files(dry_run=dry_run)
+        elif action == "logs":
+            result = clean_old_logs(dry_run=dry_run)
+        elif action == "disk":
+            result = disk_report()
+        else:
+            result = run_all_maintenance(dry_run=dry_run)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Voice Interface (Whisper STT) ─────────────────────────────────────────────
+
+@app.route("/api/voice/status", methods=["GET"])
+def voice_status():
+    from tools.voice_tools import whisper_available, get_available_models
+    return jsonify({
+        "whisper_available": whisper_available(),
+        "models": get_available_models(),
+    })
+
+
+@app.route("/api/voice/transcribe", methods=["POST"])
+def voice_transcribe():
+    if "audio" not in request.files:
+        return jsonify({"error": "audio file required"}), 400
+    f = request.files["audio"]
+    language = request.form.get("language") or None
+    model_size = request.form.get("model", "base")
+    ext = "." + (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "wav")
+
+    try:
+        from tools.voice_tools import transcribe_bytes
+        result = transcribe_bytes(f.read(), ext=ext, language=language, model_size=model_size)
+        return jsonify(result)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.exception("Transcription failed")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/voice/transcribe-and-run", methods=["POST"])
+def voice_transcribe_and_run():
+    """Transcribe audio then execute as an agent task."""
+    if "audio" not in request.files:
+        return jsonify({"error": "audio file required"}), 400
+    f = request.files["audio"]
+    model_size = request.form.get("model", "base")
+    ext = "." + (f.filename.rsplit(".", 1)[-1] if "." in f.filename else "wav")
+
+    try:
+        from tools.voice_tools import transcribe_bytes
+        transcription = transcribe_bytes(f.read(), ext=ext, model_size=model_size)
+        text = transcription.get("text", "").strip()
+        if not text:
+            return jsonify({"error": "No speech detected", "transcription": transcription}), 400
+
+        from core.orchestrator import AIOrchestrator
+        output = AIOrchestrator().run_task_sync(text)
+        return jsonify({
+            "transcription": transcription,
+            "task": text,
+            "output": output,
+        })
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.exception("Voice task failed")
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)
