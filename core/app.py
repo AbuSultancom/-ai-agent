@@ -231,6 +231,51 @@ def list_tasks():
     return jsonify({"tasks": tasks[:50]})
 
 
+# ── Models ───────────────────────────────────────────────────────────────────
+
+@app.route("/api/models", methods=["GET"])
+def models_list():
+    from core.model_router import list_all_models
+    return jsonify(list_all_models())
+
+
+@app.route("/api/models/local", methods=["GET"])
+def models_local():
+    from core.local_models import list_models, is_available
+    return jsonify({"available": is_available(), "models": list_models()})
+
+
+@app.route("/api/models/pull", methods=["POST"])
+def model_pull():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    def generate():
+        from core.local_models import pull_model
+        for line in pull_model(name):
+            yield f"data: {line}\n\n"
+        yield "event: done\ndata: pulled\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.route("/api/models/delete", methods=["POST"])
+def model_delete():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    from core.local_models import delete_model
+    ok = delete_model(name)
+    return jsonify({"deleted": ok, "name": name})
+
+
 # ── Chat ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/chat", methods=["POST"])
@@ -239,10 +284,11 @@ def chat_endpoint():
     message = data.get("message", "").strip()
     if not message:
         return jsonify({"error": "message is required"}), 400
-    history = data.get("history")  # optional pre-built history from client
+    history = data.get("history")
     session_id = request.headers.get("X-Session-Id", "default")
+    model = data.get("model")  # optional — overrides default model
     from core.chat import chat
-    reply = chat(message, session_id=session_id, history=history)
+    reply = chat(message, session_id=session_id, history=history, model=model)
     return jsonify({"reply": reply})
 
 
@@ -569,10 +615,16 @@ def chat_with_persona():
     if not message:
         return jsonify({"error": "message is required"}), 400
     session_id = request.headers.get("X-Session-Id", "default")
+    model = data.get("model")
     from core.chat import chat
     from core.personas import get_system_prompt
     system = get_system_prompt(persona_id)
-    reply = chat(message, session_id=f"{persona_id}:{session_id}", system_override=system)
+    reply = chat(
+        message,
+        session_id=f"{persona_id}:{session_id}",
+        system_override=system,
+        model=model,
+    )
     return jsonify({"reply": reply, "persona_id": persona_id})
 
 

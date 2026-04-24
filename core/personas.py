@@ -11,7 +11,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "default": {
         "id": "default",
         "name": "AI Agent",
-        "description": "وكيل ذكاء اصطناعي متعدد الأغراض",
+        "description": "General-purpose AI agent for any task",
         "system": "You are a powerful AI agent. Be helpful, accurate, and thorough.",
         "emoji": "🤖",
         "builtin": True,
@@ -19,7 +19,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "developer": {
         "id": "developer",
         "name": "Senior Developer",
-        "description": "خبير برمجة متخصص في كتابة كود نظيف وحل المشاكل التقنية",
+        "description": "Expert software engineer specializing in clean code and problem solving",
         "system": (
             "You are a senior software engineer with 15+ years of experience. "
             "You write clean, efficient, well-documented code. You explain technical "
@@ -32,7 +32,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "analyst": {
         "id": "analyst",
         "name": "Data Analyst",
-        "description": "محلل بيانات متخصص في إحصاءات وتصورات البيانات",
+        "description": "Expert in statistics, data analysis, and visualizations",
         "system": (
             "You are an expert data analyst and scientist. You excel at interpreting data, "
             "finding patterns, building models, creating visualizations, and communicating "
@@ -45,7 +45,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "writer": {
         "id": "writer",
         "name": "Creative Writer",
-        "description": "كاتب إبداعي متخصص في المحتوى والقصص والتسويق",
+        "description": "Talented writer specializing in content, stories, and marketing copy",
         "system": (
             "You are a talented creative writer and content strategist. You craft compelling "
             "narratives, engaging blog posts, persuasive copy, and creative stories. "
@@ -58,7 +58,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "researcher": {
         "id": "researcher",
         "name": "Research Analyst",
-        "description": "باحث متخصص في جمع وتحليل المعلومات بعمق",
+        "description": "Meticulous researcher who gathers and synthesizes information in depth",
         "system": (
             "You are a meticulous research analyst. You gather comprehensive information, "
             "verify facts, synthesize findings from multiple sources, identify trends, "
@@ -71,7 +71,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "tutor": {
         "id": "tutor",
         "name": "Personal Tutor",
-        "description": "معلم خاص يشرح المفاهيم بأسلوب مبسط وتفاعلي",
+        "description": "Patient teacher who explains complex concepts simply and interactively",
         "system": (
             "You are a patient and skilled personal tutor. You explain complex concepts "
             "simply, use analogies and examples, check understanding with questions, "
@@ -84,7 +84,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "security": {
         "id": "security",
         "name": "Security Expert",
-        "description": "خبير أمن معلومات متخصص في اكتشاف الثغرات وتأمين الأنظمة",
+        "description": "Cybersecurity specialist in vulnerability assessment and secure systems",
         "system": (
             "You are a cybersecurity expert with deep knowledge of penetration testing, "
             "vulnerability assessment, secure coding, OWASP top 10, network security, "
@@ -97,7 +97,7 @@ _BUILTIN_PERSONAS: dict[str, dict] = {
     "translator": {
         "id": "translator",
         "name": "Translator",
-        "description": "مترجم محترف يتقن ترجمة النصوص بدقة وطلاقة",
+        "description": "Professional translator fluent in many languages",
         "system": (
             "You are a professional translator fluent in Arabic, English, French, Spanish, "
             "German, Chinese, and many other languages. You translate accurately while "
@@ -132,8 +132,7 @@ def _save_custom(customs: dict) -> None:
 def list_personas() -> list[dict]:
     with _lock:
         customs = _load_custom()
-    all_p = {**_BUILTIN_PERSONAS, **customs}
-    return list(all_p.values())
+    return list({**_BUILTIN_PERSONAS, **customs}.values())
 
 
 def get_persona(persona_id: str) -> dict | None:
@@ -146,13 +145,16 @@ def get_persona(persona_id: str) -> dict | None:
 
 def get_system_prompt(persona_id: str) -> str:
     p = get_persona(persona_id)
-    if p:
-        return p["system"]
-    return _BUILTIN_PERSONAS["default"]["system"]
+    return p["system"] if p else _BUILTIN_PERSONAS["default"]["system"]
 
 
-def create_persona(persona_id: str, name: str, description: str,
-                   system: str, emoji: str = "🤖") -> dict:
+def create_persona(
+    persona_id: str,
+    name: str,
+    description: str,
+    system: str,
+    emoji: str = "🤖",
+) -> dict:
     persona = {
         "id": persona_id,
         "name": name,
@@ -170,7 +172,7 @@ def create_persona(persona_id: str, name: str, description: str,
 
 def delete_persona(persona_id: str) -> bool:
     if persona_id in _BUILTIN_PERSONAS:
-        return False  # can't delete builtins
+        return False
     with _lock:
         customs = _load_custom()
         if persona_id not in customs:
