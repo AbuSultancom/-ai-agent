@@ -1113,5 +1113,179 @@ def voice_transcribe_and_run():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Self-Healing System ───────────────────────────────────────────────────────
+
+@app.route("/api/heal/analyze", methods=["POST"])
+def heal_analyze():
+    data = request.get_json(silent=True) or {}
+    error = data.get("error", "").strip()
+    task = data.get("task", "").strip()
+    file_hint = data.get("file", "").strip()
+    if not error:
+        return jsonify({"error": "error field is required"}), 400
+    from core.self_healer import get_healer
+    patch = get_healer().analyze(error, task=task, file_hint=file_hint)
+    return jsonify(patch)
+
+
+@app.route("/api/heal/apply", methods=["POST"])
+def heal_apply():
+    data = request.get_json(silent=True) or {}
+    patch = data.get("patch")
+    if not patch:
+        return jsonify({"error": "patch object is required"}), 400
+    from core.self_healer import get_healer
+    result = get_healer().apply(patch)
+    return jsonify(result)
+
+
+@app.route("/api/heal/auto", methods=["POST"])
+def heal_auto():
+    """Analyze + apply in one call."""
+    data = request.get_json(silent=True) or {}
+    error = data.get("error", "").strip()
+    task = data.get("task", "").strip()
+    if not error:
+        return jsonify({"error": "error field is required"}), 400
+    from core.self_healer import auto_heal
+    result = auto_heal(error, task=task)
+    return jsonify(result)
+
+
+@app.route("/api/heal/log", methods=["GET"])
+def heal_log():
+    from core.self_healer import get_healer
+    return jsonify({"log": get_healer().get_log()})
+
+
+@app.route("/api/heal/backups", methods=["GET"])
+def heal_backups():
+    from core.self_healer import get_healer
+    return jsonify({"backups": get_healer().list_backups()})
+
+
+@app.route("/api/heal/restore", methods=["POST"])
+def heal_restore():
+    data = request.get_json(silent=True) or {}
+    backup_path = data.get("backup_path", "").strip()
+    if not backup_path:
+        return jsonify({"error": "backup_path is required"}), 400
+    from core.self_healer import get_healer
+    ok = get_healer().restore(backup_path)
+    return jsonify({"restored": ok, "backup_path": backup_path})
+
+
+# ── Digital Twin ──────────────────────────────────────────────────────────────
+
+@app.route("/api/twin/profile", methods=["GET"])
+def twin_profile():
+    from agents.digital_twin import get_twin
+    twin = get_twin()
+    return jsonify({"profile": twin.get_profile(), "summary": twin.get_summary()})
+
+
+@app.route("/api/twin/ingest/code", methods=["POST"])
+def twin_ingest_code():
+    data = request.get_json(silent=True) or {}
+    code = data.get("code", "").strip()
+    if not code:
+        return jsonify({"error": "code is required"}), 400
+    from agents.digital_twin import get_twin
+    result = get_twin().ingest_code(code, filename=data.get("filename", ""),
+                                     language=data.get("language", "python"))
+    return jsonify(result)
+
+
+@app.route("/api/twin/ingest/file", methods=["POST"])
+def twin_ingest_file():
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    content = f.read().decode("utf-8", errors="ignore")
+    ext = f.filename.rsplit(".", 1)[-1] if "." in f.filename else "txt"
+    lang = {"py": "python", "md": "markdown", "js": "javascript"}.get(ext, "text")
+    from agents.digital_twin import get_twin
+    result = get_twin().ingest_code(content, filename=f.filename, language=lang)
+    return jsonify(result)
+
+
+@app.route("/api/twin/ingest/directory", methods=["POST"])
+def twin_ingest_directory():
+    data = request.get_json(silent=True) or {}
+    path = data.get("path", "").strip()
+    if not path:
+        return jsonify({"error": "path is required"}), 400
+    from agents.digital_twin import get_twin
+    result = get_twin().ingest_directory(path)
+    return jsonify(result)
+
+
+@app.route("/api/twin/ask", methods=["POST"])
+def twin_ask():
+    data = request.get_json(silent=True) or {}
+    question = data.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+    from agents.digital_twin import get_twin
+    reply = get_twin().respond(question)
+    return jsonify({"reply": reply})
+
+
+@app.route("/api/twin/ask/stream", methods=["POST"])
+def twin_ask_stream():
+    data = request.get_json(silent=True) or {}
+    question = data.get("question", "").strip()
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    def generate():
+        from agents.digital_twin import get_twin
+        try:
+            for chunk in get_twin().respond(question, stream=True):
+                yield f"data: {chunk}\n\n"
+        except Exception as e:
+            yield f"data: [error: {e}]\n\n"
+        yield "event: done\ndata: \n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/twin/probe", methods=["GET"])
+def twin_probe():
+    from agents.digital_twin import get_twin
+    question = get_twin().generate_probing_question()
+    return jsonify({"question": question})
+
+
+@app.route("/api/twin/probe/answer", methods=["POST"])
+def twin_probe_answer():
+    data = request.get_json(silent=True) or {}
+    question = data.get("question", "").strip()
+    answer = data.get("answer", "").strip()
+    if not question or not answer:
+        return jsonify({"error": "question and answer are required"}), 400
+    from agents.digital_twin import get_twin
+    get_twin().record_answer(question, answer)
+    return jsonify({"recorded": True})
+
+
+@app.route("/api/twin/name", methods=["POST"])
+def twin_set_name():
+    data = request.get_json(silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    from agents.digital_twin import get_twin
+    get_twin().update_name(name)
+    return jsonify({"name": name})
+
+
+@app.route("/api/twin/log", methods=["GET"])
+def twin_log():
+    from agents.digital_twin import get_twin
+    return jsonify({"log": get_twin().get_ingestion_log()})
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

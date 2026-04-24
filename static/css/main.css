@@ -450,3 +450,23 @@ select:focus { border-color: var(--accent); }
 
 /* VOICE UPLOAD */
 #voice-upload-area { margin-bottom: 0; }
+
+/* HEAL LOG */
+.heal-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ok);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.heal-card.failed { border-left-color: var(--err); }
+.heal-card .heal-file { color: var(--accent2); font-weight: 600; }
+.heal-card .heal-analysis { color: var(--text); margin-top: 4px; }
+.heal-card .heal-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+
+/* TWIN PROFILE */
+#twin-summary { white-space: pre-wrap; direction: ltr; text-align: left; }
+#twin-answer  { white-space: pre-wrap; direction: ltr; text-align: left; }
+.twin-upload-area { margin-bottom: 10px; }
