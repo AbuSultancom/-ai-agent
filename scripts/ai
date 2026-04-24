@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# ai — system-wide CLI for the AI Agent service
+# After installing with scripts/install.sh, use:
+#   ai "Write a Python script that..."
+#   ai chat "Explain quantum computing"
+#   ai status | ai logs | ai start | ai stop | ai restart
+
+BASE_URL="${AI_AGENT_URL:-http://localhost:5000}"
+
+_json_encode() {
+  python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))' <<< "$*"
+}
+
+_run_task() {
+  local task="$*"
+  local payload
+  payload=$(python3 -c "import json,sys; print(json.dumps({'task': sys.argv[1]}))" "$task")
+  curl -sf -X POST "$BASE_URL/api/task/run" \
+    -H "Content-Type: application/json" \
+    -d "$payload" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('output') or d.get('error') or json.dumps(d))
+except Exception as e:
+    print(sys.stdin.read())
+"
+}
+
+_chat() {
+  local msg="$*"
+  local payload
+  payload=$(python3 -c "import json,sys; print(json.dumps({'message': sys.argv[1]}))" "$msg")
+  curl -sf -X POST "$BASE_URL/api/chat" \
+    -H "Content-Type: application/json" \
+    -d "$payload" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('reply') or d.get('error') or json.dumps(d))
+except Exception:
+    print(sys.stdin.read())
+"
+}
+
+_status() {
+  local out
+  out=$(curl -sf "$BASE_URL/health" 2>/dev/null) || {
+    echo "❌  AI Agent is not reachable at $BASE_URL"
+    echo "    Start with: sudo systemctl start ai-agent"
+    exit 1
+  }
+  echo "✅  AI Agent is running at $BASE_URL"
+  echo "$out" | python3 -m json.tool 2>/dev/null || echo "$out"
+}
+
+case "${1:-}" in
+  ""|task|run)
+    shift 2>/dev/null || true
+    if [[ -z "${*}" ]]; then
+      echo "Usage: ai \"your task description\"" >&2; exit 1
+    fi
+    _run_task "$@"
+    ;;
+  chat)
+    shift
+    if [[ -z "${*}" ]]; then
+      echo "Usage: ai chat \"your message\"" >&2; exit 1
+    fi
+    _chat "$@"
+    ;;
+  status)
+    _status
+    ;;
+  logs)
+    exec journalctl -u ai-agent -f --no-hostname
+    ;;
+  start)
+    sudo systemctl start ai-agent && echo "✅  Started"
+    ;;
+  stop)
+    sudo systemctl stop ai-agent && echo "🛑  Stopped"
+    ;;
+  restart)
+    sudo systemctl restart ai-agent && echo "🔄  Restarted"
+    ;;
+  -h|--help|help)
+    cat <<EOF
+ai — AI Agent CLI
+
+Commands:
+  ai "task"           Run a task (synchronous, streams output)
+  ai task "task"      Same as above
+  ai chat "message"   Single-turn chat reply
+  ai status           Check if the service is running
+  ai logs             Follow live logs (journalctl)
+  ai start            Start the service (requires sudo)
+  ai stop             Stop the service (requires sudo)
+  ai restart          Restart the service (requires sudo)
+
+Environment:
+  AI_AGENT_URL        Override base URL (default: http://localhost:5000)
+
+Install:
+  sudo bash scripts/install.sh
+EOF
+    ;;
+  *)
+    # Treat anything else as a task
+    _run_task "$@"
+    ;;
+esac

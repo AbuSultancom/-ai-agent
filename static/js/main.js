@@ -13,13 +13,25 @@ function getAuthHeader() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+function getActiveModel() {
+  return localStorage.getItem('active_model') || '';
+}
+
+function setActiveModel(model) {
+  localStorage.setItem('active_model', model);
+  const gSel = $('global-model-select');
+  if (gSel && model) gSel.value = model;
+  const cSel = $('chat-model-select');
+  if (cSel && model) cSel.value = model;
+}
+
 function timeAgo(iso) {
   if (!iso) return '';
   const diff = (Date.now() - new Date(iso)) / 1000;
-  if (diff < 60) return `${Math.round(diff)}ث`;
-  if (diff < 3600) return `${Math.round(diff / 60)}د`;
-  if (diff < 86400) return `${Math.round(diff / 3600)}س`;
-  return `${Math.round(diff / 86400)}ي`;
+  if (diff < 60) return `${Math.round(diff)}s`;
+  if (diff < 3600) return `${Math.round(diff / 60)}m`;
+  if (diff < 86400) return `${Math.round(diff / 3600)}h`;
+  return `${Math.round(diff / 86400)}d`;
 }
 
 function renderMarkdown(text) {
@@ -59,6 +71,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');
     $(`tab-${btn.dataset.tab}`).classList.add('active');
+    if (btn.dataset.tab === 'models') loadModels();
+    if (btn.dataset.tab === 'monitoring') loadMonitoring();
   });
 });
 
@@ -73,13 +87,16 @@ async function runTask() {
   if (!task) return;
   const btn = $('run-task-btn');
   btn.disabled = true;
-  btn.innerHTML = '⏳ جارٍ التنفيذ… <span class="spinner"></span>';
+  btn.innerHTML = '⏳ Running… <span class="spinner"></span>';
   taskOutput.textContent = '';
 
   try {
-    const res = await APIJ('/api/task', { task });
+    const model = getActiveModel();
+    const body = { task };
+    if (model) body.model = model;
+    const res = await APIJ('/api/task', body);
     const { task_id } = await res.json();
-    if (!task_id) throw new Error('لم يتم إنشاء المهمة');
+    if (!task_id) throw new Error('Task creation failed');
 
     if (currentEventSource) currentEventSource.close();
     currentEventSource = new EventSource(`/api/task/${task_id}/stream`);
@@ -90,20 +107,20 @@ async function runTask() {
     currentEventSource.addEventListener('done', e => {
       currentEventSource.close();
       btn.disabled = false;
-      btn.textContent = '▶ تشغيل';
+      btn.textContent = '▶ Run';
       loadTasks();
-      showToast(e.data === 'completed' ? '✅ اكتملت المهمة' : '❌ فشلت المهمة',
+      showToast(e.data === 'completed' ? '✅ Task completed' : '❌ Task failed',
         e.data === 'completed' ? 'ok' : 'err');
     });
     currentEventSource.onerror = () => {
       currentEventSource.close();
       btn.disabled = false;
-      btn.textContent = '▶ تشغيل';
+      btn.textContent = '▶ Run';
     };
   } catch (err) {
-    taskOutput.textContent = `خطأ: ${err.message}`;
+    taskOutput.textContent = `Error: ${err.message}`;
     btn.disabled = false;
-    btn.textContent = '▶ تشغيل';
+    btn.textContent = '▶ Run';
   }
 }
 
@@ -117,7 +134,7 @@ async function loadTasks() {
     const r = await API('/api/tasks');
     const { tasks } = await r.json();
     const list = $('tasks-list');
-    if (!tasks.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">لا توجد مهام بعد</p>'; return; }
+    if (!tasks.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No tasks yet</p>'; return; }
     list.innerHTML = tasks.map(t => `
       <div class="task-card" onclick="showTaskOutput('${t.id}','${escHtml(t.task)}')">
         <div class="task-head">
@@ -132,7 +149,7 @@ async function loadTasks() {
 function showTaskOutput(id, taskText) {
   $('task-input').value = taskText;
   API(`/api/task/${id}`).then(r => r.json()).then(t => {
-    taskOutput.textContent = t.output || '(لا يوجد مخرجات)';
+    taskOutput.textContent = t.output || '(no output)';
     taskOutput.scrollTop = taskOutput.scrollHeight;
   });
 }
@@ -156,13 +173,14 @@ async function sendChat() {
   const text = input.value.trim();
   if (!text) return;
   const personaId = $('persona-select').value;
+  const modelOverride = $('chat-model-select').value || getActiveModel() || '';
   input.value = '';
   chatHistory.push({ role: 'user', content: text });
   renderChat();
 
   const typing = document.createElement('div');
   typing.className = 'msg assistant typing';
-  typing.textContent = 'يكتب…';
+  typing.textContent = 'Typing…';
   $('chat-messages').appendChild(typing);
   $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
 
@@ -171,16 +189,17 @@ async function sendChat() {
     const body = personaId !== 'default'
       ? { message: text, persona_id: personaId }
       : { message: text, history: chatHistory.slice(-20) };
+    if (modelOverride) body.model = modelOverride;
     const res = await APIJ(endpoint, body);
     const data = await res.json();
     typing.remove();
-    const reply = data.reply || data.error || 'لا رد';
+    const reply = data.reply || data.error || 'No response';
     chatHistory.push({ role: 'assistant', content: reply });
     localStorage.setItem('chat_history', JSON.stringify(chatHistory.slice(-60)));
     renderChat();
   } catch (err) {
     typing.remove();
-    chatHistory.push({ role: 'assistant', content: `خطأ: ${err.message}` });
+    chatHistory.push({ role: 'assistant', content: `Error: ${err.message}` });
     renderChat();
   }
 }
@@ -203,25 +222,25 @@ $('memory-search-btn').addEventListener('click', async () => {
   const q = $('memory-query').value.trim();
   if (!q) return;
   const box = $('memory-results');
-  box.textContent = 'جاري البحث…';
+  box.textContent = 'Searching…';
   try {
     const r = await APIJ('/api/memory/search', { query: q, n_results: 8 });
     const { results } = await r.json();
-    if (!results.length) { box.textContent = 'لا توجد نتائج'; return; }
+    if (!results.length) { box.textContent = 'No results found'; return; }
     box.innerHTML = results.map(r =>
       `<div style="margin-bottom:12px"><strong style="color:var(--accent2)">${escHtml(r.key)}</strong>` +
       `<span style="color:var(--muted);font-size:12px"> (${r.score || ''})</span><br>${escHtml(r.content)}</div>`
     ).join('<hr style="border-color:var(--border);margin:10px 0">');
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('memory-store-btn').addEventListener('click', async () => {
   const key = $('memory-key').value.trim();
   const content = $('memory-content').value.trim();
-  if (!key || !content) return showToast('أدخل المفتاح والمحتوى', 'err');
+  if (!key || !content) return showToast('Key and content are required', 'err');
   const r = await APIJ('/api/memory', { key, content });
   const data = await r.json();
-  $('memory-store-result').textContent = data.stored ? `✅ تم حفظ: ${key}` : JSON.stringify(data);
+  $('memory-store-result').textContent = data.stored ? `✅ Saved: ${key}` : JSON.stringify(data);
   $('memory-key').value = '';
   $('memory-content').value = '';
 });
@@ -245,16 +264,16 @@ fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
 async function uploadFiles(files) {
   const result = $('upload-result');
   for (const file of files) {
-    result.textContent = `جارٍ رفع ${file.name}…`;
+    result.textContent = `Uploading ${file.name}…`;
     const fd = new FormData();
     fd.append('file', file);
     try {
       const r = await fetch('/api/rag/upload', { method: 'POST', body: fd, headers: getAuthHeader() });
       const data = await r.json();
       result.textContent = data.message || JSON.stringify(data);
-      showToast(`✅ ${file.name} تم رفعه`, 'ok');
+      showToast(`✅ ${file.name} uploaded`, 'ok');
       loadDocs();
-    } catch (e) { result.textContent = `خطأ: ${e.message}`; }
+    } catch (e) { result.textContent = `Error: ${e.message}`; }
   }
 }
 
@@ -262,12 +281,12 @@ $('rag-ask-btn').addEventListener('click', async () => {
   const q = $('rag-query').value.trim();
   if (!q) return;
   const box = $('rag-answer');
-  box.textContent = 'جارٍ البحث في المستندات…';
+  box.textContent = 'Searching documents…';
   try {
     const r = await APIJ('/api/rag/query', { query: q });
     const data = await r.json();
-    box.textContent = data.answer || data.error || 'لا توجد إجابة';
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+    box.textContent = data.answer || data.error || 'No answer found';
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('refresh-docs-btn').addEventListener('click', loadDocs);
@@ -277,13 +296,13 @@ async function loadDocs() {
     const r = await API('/api/rag/documents');
     const { documents } = await r.json();
     const list = $('docs-list');
-    if (!documents.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">لا توجد مستندات</p>'; return; }
+    if (!documents.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No documents yet</p>'; return; }
     list.innerHTML = documents.map(d => `
       <div class="task-card">
         <div class="task-head">
           <span class="task-text">📄 ${escHtml(d.name)}</span>
-          <span class="task-time">${d.chunks} قطعة</span>
-          <button class="btn danger small" onclick="deleteDoc('${escHtml(d.name)}')">حذف</button>
+          <span class="task-time">${d.chunks} chunks</span>
+          <button class="btn danger small" onclick="deleteDoc('${escHtml(d.name)}')">Delete</button>
         </div>
       </div>`).join('');
   } catch { }
@@ -292,7 +311,7 @@ async function loadDocs() {
 async function deleteDoc(name) {
   await APIJ('/api/rag/documents', { name }, 'DELETE');
   loadDocs();
-  showToast(`🗑️ تم حذف ${name}`);
+  showToast(`🗑️ ${name} deleted`);
 }
 
 loadDocs();
@@ -323,9 +342,9 @@ function setVisionFile(file) {
 }
 
 $('vision-analyze-btn').addEventListener('click', async () => {
-  if (!visionFile) return showToast('اختر صورة أولاً', 'err');
+  if (!visionFile) return showToast('Select an image first', 'err');
   const box = $('vision-result');
-  box.textContent = 'جارٍ التحليل…';
+  box.textContent = 'Analyzing…';
   const fd = new FormData();
   fd.append('image', visionFile);
   const q = $('vision-question').value.trim();
@@ -333,33 +352,33 @@ $('vision-analyze-btn').addEventListener('click', async () => {
   try {
     const r = await fetch('/api/vision/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
     const data = await r.json();
-    box.textContent = data.analysis || data.error || 'لا توجد نتيجة';
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+    box.textContent = data.analysis || data.error || 'No result';
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('vision-ocr-btn').addEventListener('click', async () => {
-  if (!visionFile) return showToast('اختر صورة أولاً', 'err');
+  if (!visionFile) return showToast('Select an image first', 'err');
   const box = $('vision-result');
-  box.textContent = 'جارٍ استخراج النص…';
+  box.textContent = 'Extracting text…';
   const fd = new FormData();
   fd.append('image', visionFile);
   try {
     const r = await fetch('/api/vision/ocr', { method: 'POST', body: fd, headers: getAuthHeader() });
     const data = await r.json();
-    box.textContent = data.text || data.error || 'لا يوجد نص';
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+    box.textContent = data.text || data.error || 'No text found';
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('vision-url-btn').addEventListener('click', async () => {
   const url = $('vision-url').value.trim();
-  if (!url) return showToast('أدخل رابط الصورة', 'err');
+  if (!url) return showToast('Enter image URL', 'err');
   const box = $('vision-url-result');
-  box.textContent = 'جارٍ التحليل…';
+  box.textContent = 'Analyzing…';
   try {
     const r = await APIJ('/api/vision/analyze', { url, question: $('vision-url-question').value.trim() });
     const data = await r.json();
-    box.textContent = data.analysis || data.error || 'لا توجد نتيجة';
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+    box.textContent = data.analysis || data.error || 'No result';
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 /* ═══════════════════════════════════════
@@ -382,9 +401,9 @@ dataInput.addEventListener('change', () => {
 });
 
 $('data-analyze-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
   const box = $('data-result');
-  box.textContent = 'جارٍ التحليل…';
+  box.textContent = 'Analyzing…';
   const fd = new FormData();
   fd.append('file', dataFile);
   const q = $('data-question').value.trim();
@@ -393,26 +412,26 @@ $('data-analyze-btn').addEventListener('click', async () => {
     const r = await fetch('/api/data/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
     const data = await r.json();
     box.textContent = data.answer || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('data-summary-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
   const box = $('data-result');
-  box.textContent = 'جارٍ التحميل…';
+  box.textContent = 'Loading…';
   const fd = new FormData();
   fd.append('file', dataFile);
   try {
     const r = await fetch('/api/data/upload', { method: 'POST', body: fd, headers: getAuthHeader() });
     const data = await r.json();
     box.textContent = data.summary || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('chart-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('اختر ملف CSV أو Excel', 'err');
+  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
   const resultDiv = $('chart-result');
-  resultDiv.innerHTML = '<p style="color:var(--muted)">جارٍ إنشاء المخطط…</p>';
+  resultDiv.innerHTML = '<p style="color:var(--muted)">Generating chart…</p>';
   const fd = new FormData();
   fd.append('file', dataFile);
   fd.append('chart_type', $('chart-type').value);
@@ -426,7 +445,7 @@ $('chart-btn').addEventListener('click', async () => {
     } else {
       resultDiv.textContent = data.error || JSON.stringify(data);
     }
-  } catch (e) { resultDiv.textContent = `خطأ: ${e.message}`; }
+  } catch (e) { resultDiv.textContent = `Error: ${e.message}`; }
 });
 
 /* ═══════════════════════════════════════
@@ -444,14 +463,10 @@ async function loadPersonas() {
         <div class="p-emoji">${p.emoji || '🤖'}</div>
         <div class="p-name">${escHtml(p.name)}</div>
         <div class="p-desc">${escHtml(p.description || '')}</div>
-        ${p.builtin ? '' : `<button class="btn danger small p-badge" onclick="deletePersona(event,'${p.id}')">حذف</button>`}
+        ${p.builtin ? '' : `<button class="btn danger small p-badge" onclick="deletePersona(event,'${p.id}')">Delete</button>`}
       </div>`).join('');
 
-    // Also populate persona select in chat tab
     const sel = $('persona-select');
-    const customOptions = personas.filter(p => !p.builtin)
-      .map(p => `<option value="${p.id}">${p.emoji || '🤖'} ${escHtml(p.name)}</option>`).join('');
-    // Keep the builtin options, just add custom ones
     const existingValues = [...sel.options].map(o => o.value);
     personas.filter(p => !p.builtin && !existingValues.includes(p.id)).forEach(p => {
       const opt = document.createElement('option');
@@ -465,15 +480,15 @@ async function loadPersonas() {
 function selectPersona(id) {
   $('persona-select').value = id;
   document.querySelector('[data-tab="chat"]').click();
-  showToast(`تم اختيار شخصية: ${id}`, 'ok');
+  showToast(`Persona selected: ${id}`, 'ok');
 }
 
 async function deletePersona(evt, id) {
   evt.stopPropagation();
   const r = await fetch(`/api/personas/${id}`, { method: 'DELETE', headers: getAuthHeader() });
   const data = await r.json();
-  if (data.deleted) { showToast('تم الحذف', 'ok'); loadPersonas(); }
-  else showToast(data.error || 'خطأ', 'err');
+  if (data.deleted) { showToast('Deleted', 'ok'); loadPersonas(); }
+  else showToast(data.error || 'Error', 'err');
 }
 
 $('persona-create-btn').addEventListener('click', async () => {
@@ -482,10 +497,10 @@ $('persona-create-btn').addEventListener('click', async () => {
   const emoji = $('persona-emoji').value.trim() || '🤖';
   const desc = $('persona-desc').value.trim();
   const system = $('persona-system').value.trim();
-  if (!pid || !name || !system) return showToast('ID واسم وsystem prompt مطلوبة', 'err');
+  if (!pid || !name || !system) return showToast('ID, name, and system prompt are required', 'err');
   const r = await APIJ('/api/personas', { id: pid, name, description: desc, system, emoji });
   const data = await r.json();
-  $('persona-create-result').textContent = data.id ? `✅ تم إنشاء: ${data.name}` : JSON.stringify(data);
+  $('persona-create-result').textContent = data.id ? `✅ Created: ${data.name}` : JSON.stringify(data);
   if (data.id) { loadPersonas(); $('persona-id').value = ''; $('persona-name').value = ''; $('persona-system').value = ''; }
 });
 
@@ -506,17 +521,16 @@ async function loadTemplates() {
         <div class="tmpl-info">
           <div class="tmpl-name">${escHtml(t.name)}</div>
           <div class="tmpl-desc">${escHtml(t.description || '')}</div>
-          <div class="tmpl-vars">متغيرات: ${(t.variables || []).map(v => `{{${v}}}`).join(', ')}</div>
+          <div class="tmpl-vars">Variables: ${(t.variables || []).map(v => `{{${v}}}`).join(', ')}</div>
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn secondary small" onclick="selectTemplate('${t.id}')">استخدام</button>
-          ${t.builtin ? '' : `<button class="btn danger small" onclick="deleteTemplate('${t.id}')">حذف</button>`}
+          <button class="btn secondary small" onclick="selectTemplate('${t.id}')">Use</button>
+          ${t.builtin ? '' : `<button class="btn danger small" onclick="deleteTemplate('${t.id}')">Delete</button>`}
         </div>
       </div>`).join('');
 
-    // Populate select
     const sel = $('template-select');
-    sel.innerHTML = '<option value="">— اختر قالباً —</option>' +
+    sel.innerHTML = '<option value="">— Select a template —</option>' +
       templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
   } catch { }
 }
@@ -544,29 +558,29 @@ async function buildTemplateVarsForm(id) {
 
 $('template-run-btn').addEventListener('click', async () => {
   const id = $('template-select').value;
-  if (!id) return showToast('اختر قالباً', 'err');
-  const vars = collectTemplateVars(id);
+  if (!id) return showToast('Select a template', 'err');
+  const vars = collectTemplateVars();
   const box = $('template-result');
-  box.textContent = 'جارٍ التنفيذ…';
+  box.textContent = 'Running…';
   try {
     const r = await APIJ(`/api/templates/${id}/run`, { variables: vars });
     const data = await r.json();
     box.textContent = data.output || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
 });
 
 $('template-preview-btn').addEventListener('click', async () => {
   const id = $('template-select').value;
-  if (!id) return showToast('اختر قالباً', 'err');
-  const vars = collectTemplateVars(id);
+  if (!id) return showToast('Select a template', 'err');
+  const vars = collectTemplateVars();
   try {
     const r = await APIJ(`/api/templates/${id}/render`, { variables: vars });
     const data = await r.json();
     $('template-result').textContent = data.rendered || data.error || JSON.stringify(data);
-  } catch (e) { $('template-result').textContent = `خطأ: ${e.message}`; }
+  } catch (e) { $('template-result').textContent = `Error: ${e.message}`; }
 });
 
-function collectTemplateVars(id) {
+function collectTemplateVars() {
   const vars = {};
   document.querySelectorAll('#template-vars-form input').forEach(inp => {
     const key = inp.id.replace('tvar-', '');
@@ -579,18 +593,18 @@ $('new-tmpl-btn').addEventListener('click', async () => {
   const name = $('new-tmpl-name').value.trim();
   const tmpl = $('new-tmpl-text').value.trim();
   const desc = $('new-tmpl-desc').value.trim();
-  if (!name || !tmpl) return showToast('الاسم والقالب مطلوبان', 'err');
+  if (!name || !tmpl) return showToast('Name and template body are required', 'err');
   const r = await APIJ('/api/templates', { name, template: tmpl, description: desc });
   const data = await r.json();
-  $('new-tmpl-result').textContent = data.id ? `✅ تم حفظ: ${data.name}` : JSON.stringify(data);
+  $('new-tmpl-result').textContent = data.id ? `✅ Saved: ${data.name}` : JSON.stringify(data);
   if (data.id) { loadTemplates(); $('new-tmpl-name').value = ''; $('new-tmpl-text').value = ''; }
 });
 
 async function deleteTemplate(id) {
   const r = await fetch(`/api/templates/${id}`, { method: 'DELETE', headers: getAuthHeader() });
   const data = await r.json();
-  if (data.deleted) { showToast('تم الحذف', 'ok'); loadTemplates(); }
-  else showToast(data.error || 'خطأ', 'err');
+  if (data.deleted) { showToast('Deleted', 'ok'); loadTemplates(); }
+  else showToast(data.error || 'Error', 'err');
 }
 
 loadTemplates();
@@ -600,22 +614,25 @@ loadTemplates();
 ═══════════════════════════════════════ */
 $('batch-run-btn').addEventListener('click', async () => {
   const lines = $('batch-input').value.trim().split('\n').map(l => l.trim()).filter(Boolean);
-  if (!lines.length) return showToast('أدخل المهام', 'err');
+  if (!lines.length) return showToast('Enter at least one task', 'err');
   const box = $('batch-result');
   const btn = $('batch-run-btn');
   btn.disabled = true;
-  btn.innerHTML = '⏳ جارٍ التنفيذ… <span class="spinner"></span>';
-  box.textContent = `جارٍ تنفيذ ${lines.length} مهمة بالتوازي…`;
+  btn.innerHTML = '⏳ Running… <span class="spinner"></span>';
+  box.textContent = `Running ${lines.length} tasks in parallel…`;
   try {
-    const r = await APIJ('/api/batch', { tasks: lines });
+    const body = { tasks: lines };
+    const model = getActiveModel();
+    if (model) body.model = model;
+    const r = await APIJ('/api/batch', body);
     const data = await r.json();
-    if (data.error) { box.textContent = `خطأ: ${data.error}`; return; }
-    box.innerHTML = `<strong>✅ ${data.completed} مكتملة | ❌ ${data.failed} فاشلة</strong>\n\n` +
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+    box.innerHTML = `<strong>✅ ${data.completed} completed | ❌ ${data.failed} failed</strong>\n\n` +
       data.results.map((res, i) =>
-        `--- مهمة ${i + 1} [${res.status}] ---\n${res.task}\n\n${res.output || res.error || ''}`
+        `--- Task ${i + 1} [${res.status}] ---\n${res.task}\n\n${res.output || res.error || ''}`
       ).join('\n\n═══════════════════\n\n');
-  } catch (e) { box.textContent = `خطأ: ${e.message}`; }
-  finally { btn.disabled = false; btn.textContent = '▶ تشغيل الكل'; }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+  finally { btn.disabled = false; btn.textContent = '▶ Run All'; }
 });
 
 /* ═══════════════════════════════════════
@@ -625,10 +642,10 @@ $('sched-add-btn').addEventListener('click', async () => {
   const name = $('sched-name').value.trim();
   const task = $('sched-task').value.trim();
   const cron = $('sched-cron').value.trim();
-  if (!name || !task || !cron) return showToast('أكمل جميع الحقول', 'err');
+  if (!name || !task || !cron) return showToast('All fields are required', 'err');
   const r = await APIJ('/api/scheduler/jobs', { name, task, cron });
   const data = await r.json();
-  $('sched-result').textContent = data.id ? `✅ تمت الجدولة: ${data.id}` : JSON.stringify(data);
+  $('sched-result').textContent = data.id ? `✅ Scheduled: ${data.id}` : JSON.stringify(data);
   $('sched-name').value = ''; $('sched-task').value = ''; $('sched-cron').value = '';
   loadJobs();
 });
@@ -640,15 +657,15 @@ async function loadJobs() {
     const r = await API('/api/scheduler/jobs');
     const { jobs } = await r.json();
     const list = $('sched-list');
-    if (!jobs.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">لا توجد مهام مجدولة</p>'; return; }
+    if (!jobs.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No scheduled jobs</p>'; return; }
     list.innerHTML = jobs.map(j => `
       <div class="task-card">
         <div class="task-head">
           <span class="task-text">⏰ ${escHtml(j.name)} — <code style="font-size:12px">${escHtml(j.cron)}</code></span>
-          <span class="task-time">${j.next_run ? 'التالي: ' + j.next_run : ''}</span>
-          <button class="btn danger small" onclick="deleteJob('${j.id}')">حذف</button>
+          <span class="task-time">${j.next_run ? 'Next: ' + j.next_run : ''}</span>
+          <button class="btn danger small" onclick="deleteJob('${j.id}')">Delete</button>
         </div>
-        <div style="color:var(--muted);font-size:13px;margin-top:4px">${escHtml(j.task).slice(0,80)}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:4px">${escHtml(j.task).slice(0, 80)}</div>
       </div>`).join('');
   } catch { }
 }
@@ -661,7 +678,179 @@ async function deleteJob(id) {
 loadJobs();
 
 /* ═══════════════════════════════════════
-   TAB 11 — MONITORING
+   TAB 11 — MODELS
+═══════════════════════════════════════ */
+async function loadModels() {
+  const grid = $('models-grid');
+  const status = $('models-status');
+  grid.innerHTML = '<p style="color:var(--muted)">Loading models…</p>';
+  try {
+    const r = await API('/api/models');
+    const data = await r.json();
+    const { claude = [], local = [], ollama_available = false, current_model = '' } = data;
+
+    status.textContent = ollama_available
+      ? `✅ Ollama connected — ${local.length} local model(s) available`
+      : '⚠️ Ollama not running — only Claude models available';
+
+    const activeModel = getActiveModel() || current_model;
+    let html = '';
+
+    if (claude.length) {
+      html += `<div style="grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:4px">── Claude (Anthropic) ──</div>`;
+      html += claude.map(m => `
+        <div class="model-card ${activeModel === m.id ? 'active-model' : ''}">
+          <div class="m-name">${escHtml(m.name || m.id)}</div>
+          <div class="m-provider">Anthropic</div>
+          <div class="m-size">${escHtml(m.description || '')}</div>
+          <div class="m-actions">
+            <button class="btn secondary small" onclick="useModel('${escHtml(m.id)}')">Use</button>
+          </div>
+        </div>`).join('');
+    }
+
+    if (local.length) {
+      html += `<div style="grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:8px">── Local (Ollama) ──</div>`;
+      html += local.map(m => `
+        <div class="model-card ${activeModel === m.name ? 'active-model' : ''}">
+          <div class="m-name">${escHtml(m.name)}</div>
+          <div class="m-provider">Local / Ollama</div>
+          <div class="m-size">${m.size ? (m.size / 1e9).toFixed(1) + ' GB' : ''}</div>
+          <div class="m-actions">
+            <button class="btn secondary small" onclick="useModel('${escHtml(m.name)}')">Use</button>
+            <button class="btn danger small" onclick="deleteLocalModel('${escHtml(m.name)}')">Delete</button>
+          </div>
+        </div>`).join('');
+    }
+
+    if (!claude.length && !local.length) {
+      html = '<p style="color:var(--muted)">No models found. Check your API key and Ollama status.</p>';
+    }
+
+    grid.innerHTML = html;
+    loadAllModelSelects(data);
+  } catch (e) {
+    grid.textContent = `Error: ${e.message}`;
+  }
+}
+
+function useModel(modelId) {
+  setActiveModel(modelId);
+  showToast(`Active model: ${modelId}`, 'ok');
+  loadModels();
+}
+
+async function deleteLocalModel(name) {
+  if (!confirm(`Delete local model "${name}"?`)) return;
+  try {
+    const r = await APIJ('/api/models/delete', { name });
+    const data = await r.json();
+    if (data.deleted) { showToast(`Deleted: ${name}`, 'ok'); loadModels(); }
+    else showToast(data.error || 'Delete failed', 'err');
+  } catch (e) { showToast(`Error: ${e.message}`, 'err'); }
+}
+
+function loadAllModelSelects(data) {
+  const { claude = [], local = [], current_model = '' } = data || {};
+  const activeModel = getActiveModel() || current_model;
+
+  const buildOptions = () => {
+    let opts = '<option value="">Default (config)</option>';
+    if (claude.length) {
+      opts += `<optgroup label="Claude Models">`;
+      opts += claude.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name || m.id)}</option>`).join('');
+      opts += `</optgroup>`;
+    }
+    if (local.length) {
+      opts += `<optgroup label="Local (Ollama)">`;
+      opts += local.map(m => `<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
+      opts += `</optgroup>`;
+    }
+    return opts;
+  };
+
+  const gSel = $('global-model-select');
+  const cSel = $('chat-model-select');
+  const opts = buildOptions();
+  if (gSel) { gSel.innerHTML = opts; if (activeModel) gSel.value = activeModel; }
+  if (cSel) { cSel.innerHTML = opts; if (activeModel) cSel.value = activeModel; }
+}
+
+/* Pull a local model via SSE */
+$('pull-model-btn').addEventListener('click', pullModel);
+
+async function pullModel() {
+  const customVal = $('pull-model-custom').value.trim();
+  const selectVal = $('pull-model-select').value;
+  const modelName = customVal || selectVal;
+  if (!modelName) return showToast('Select or type a model name', 'err');
+
+  const box = $('pull-result');
+  const btn = $('pull-model-btn');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Pulling… <span class="spinner"></span>';
+  box.textContent = `Pulling ${modelName}…\n`;
+
+  try {
+    const res = await fetch('/api/models/pull', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ name: modelName }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      box.textContent = `Error: ${err.error || res.statusText}`;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const text = line.slice(6);
+          if (text && text !== '[DONE]') {
+            box.textContent += text + '\n';
+            box.scrollTop = box.scrollHeight;
+          }
+        }
+      }
+    }
+    showToast(`✅ ${modelName} pulled successfully`, 'ok');
+    loadModels();
+  } catch (e) {
+    box.textContent += `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Pull';
+  }
+}
+
+/* Global model select change handler */
+$('global-model-select').addEventListener('change', () => {
+  const val = $('global-model-select').value;
+  setActiveModel(val);
+  if (val) showToast(`Active model: ${val}`, 'ok');
+});
+
+$('refresh-models-btn').addEventListener('click', loadModels);
+
+/* Load models on startup to populate selects */
+(async () => {
+  try {
+    const r = await API('/api/models');
+    const data = await r.json();
+    loadAllModelSelects(data);
+  } catch { }
+})();
+
+/* ═══════════════════════════════════════
+   TAB 12 — MONITORING
 ═══════════════════════════════════════ */
 $('refresh-stats-btn').addEventListener('click', loadMonitoring);
 
@@ -677,11 +866,11 @@ async function loadMonitoring() {
     const { hourly } = await hourR.json();
 
     $('stats-grid').innerHTML = [
-      { label: 'إجمالي الطلبات', value: stats.total_requests },
-      { label: 'رموز الإدخال', value: (stats.total_input_tokens || 0).toLocaleString() },
-      { label: 'رموز الإخراج', value: (stats.total_output_tokens || 0).toLocaleString() },
-      { label: 'التكلفة (USD)', value: `$${(stats.total_cost_usd || 0).toFixed(4)}` },
-      { label: 'الأخطاء', value: stats.errors || 0 },
+      { label: 'Total Requests', value: stats.total_requests },
+      { label: 'Input Tokens', value: (stats.total_input_tokens || 0).toLocaleString() },
+      { label: 'Output Tokens', value: (stats.total_output_tokens || 0).toLocaleString() },
+      { label: 'Cost (USD)', value: `$${(stats.total_cost_usd || 0).toFixed(4)}` },
+      { label: 'Errors', value: stats.errors || 0 },
     ].map(s => `
       <div class="stat-card">
         <div class="stat-value">${escHtml(String(s.value))}</div>
@@ -693,10 +882,326 @@ async function loadMonitoring() {
     ).join('\n');
 
     $('hourly-list').textContent = hourly.map(h =>
-      `${h.hour}: ${h.requests} طلب | ${h.tokens} رمز | $${h.cost.toFixed(4)}`
-    ).join('\n') || 'لا توجد بيانات بعد';
-  } catch (e) { $('stats-grid').textContent = `خطأ: ${e.message}`; }
+      `${h.hour}: ${h.requests} requests | ${h.tokens} tokens | $${h.cost.toFixed(4)}`
+    ).join('\n') || 'No data yet';
+  } catch (e) { $('stats-grid').textContent = `Error: ${e.message}`; }
 }
 
-// Load monitoring when its tab is selected
-document.querySelector('[data-tab="monitoring"]').addEventListener('click', loadMonitoring);
+/* ═══════════════════════════════════════
+   TAB — MULTI-AGENT SYSTEM
+═══════════════════════════════════════ */
+async function loadAgentsGrid() {
+  try {
+    const r = await API('/api/agents');
+    const { agents } = await r.json();
+    $('agents-grid').innerHTML = agents.map(a => `
+      <div class="agent-card">
+        <div class="a-emoji">${a.emoji || '🤖'}</div>
+        <div class="a-name">${escHtml(a.name)}</div>
+        <div class="a-desc">${escHtml(a.description)}</div>
+      </div>`).join('');
+  } catch { }
+}
+
+async function loadAgentHistory() {
+  try {
+    const r = await API('/api/agents/history');
+    const { history } = await r.json();
+    const list = $('agent-history');
+    if (!history.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No team runs yet</p>'; return; }
+    list.innerHTML = history.map(h => `
+      <div class="task-card">
+        <div class="task-head">
+          <span class="task-text">${escHtml(h.task)}</span>
+          <span class="task-time">${h.ts}</span>
+          <span class="badge running">${h.mode}</span>
+        </div>
+        <div style="color:var(--muted);font-size:12px;margin-top:4px">
+          Agents: ${h.agents.join(', ')}
+        </div>
+      </div>`).join('');
+  } catch { }
+}
+
+$('agent-run-btn').addEventListener('click', async () => {
+  const task = $('agent-task-input').value.trim();
+  const mode = $('agent-mode-select').value;
+  if (!task) return showToast('Enter a task', 'err');
+
+  const btn = $('agent-run-btn');
+  const box = $('agent-output');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Team working… <span class="spinner"></span>';
+  box.textContent = '';
+
+  try {
+    const res = await fetch('/api/agents/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ task, mode }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      box.textContent = `Error: ${err.error || res.statusText}`;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const text = line.slice(6).replace(/\\n/g, '\n');
+          box.textContent += text;
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    }
+    loadAgentHistory();
+    showToast('✅ Team task complete', 'ok');
+  } catch (e) {
+    box.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Team';
+  }
+});
+
+$('refresh-agent-history-btn').addEventListener('click', loadAgentHistory);
+
+document.querySelector('[data-tab="agents"]').addEventListener('click', () => {
+  loadAgentsGrid();
+  loadAgentHistory();
+});
+
+/* ═══════════════════════════════════════
+   TAB — VOICE
+═══════════════════════════════════════ */
+let voiceAudioBlob = null;
+let voiceMediaRecorder = null;
+let voiceChunks = [];
+
+async function checkVoiceStatus() {
+  try {
+    const r = await API('/api/voice/status');
+    const data = await r.json();
+    $('voice-status').textContent = data.whisper_available
+      ? `✅ Whisper available — models: ${data.models.join(', ')}`
+      : '⚠️ Whisper not installed. Run: pip install openai-whisper';
+  } catch (e) {
+    $('voice-status').textContent = `Status check failed: ${e.message}`;
+  }
+}
+
+const voiceArea = $('voice-upload-area');
+const voiceFileInput = $('voice-file-input');
+voiceArea.addEventListener('click', () => voiceFileInput.click());
+voiceArea.addEventListener('dragover', e => { e.preventDefault(); voiceArea.classList.add('dragover'); });
+voiceArea.addEventListener('dragleave', () => voiceArea.classList.remove('dragover'));
+voiceArea.addEventListener('drop', e => {
+  e.preventDefault();
+  voiceArea.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) {
+    voiceAudioBlob = e.dataTransfer.files[0];
+    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
+  }
+});
+voiceFileInput.addEventListener('change', () => {
+  if (voiceFileInput.files[0]) {
+    voiceAudioBlob = voiceFileInput.files[0];
+    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
+  }
+});
+
+async function _doTranscribe(runAsTask = false) {
+  if (!voiceAudioBlob) return showToast('Select or record an audio file first', 'err');
+  const box = runAsTask ? $('voice-result') : $('voice-result');
+  box.textContent = 'Transcribing…';
+
+  const fd = new FormData();
+  fd.append('audio', voiceAudioBlob, voiceAudioBlob.name || 'audio.wav');
+  const lang = $('voice-language').value.trim();
+  if (lang) fd.append('language', lang);
+  fd.append('model', $('voice-model-select').value);
+
+  const endpoint = runAsTask ? '/api/voice/transcribe-and-run' : '/api/voice/transcribe';
+  try {
+    const r = await fetch(endpoint, { method: 'POST', body: fd, headers: getAuthHeader() });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+
+    if (runAsTask) {
+      box.textContent = `[Transcription] ${data.transcription?.text || ''}\n\n[Task Output]\n${data.output || ''}`;
+    } else {
+      const segs = (data.segments || []).map(s =>
+        `[${s.start.toFixed(1)}s → ${s.end.toFixed(1)}s] ${s.text}`).join('\n');
+      box.textContent = `Language: ${data.language || 'auto'}\n\n${data.text}\n\n${segs ? 'Segments:\n' + segs : ''}`;
+    }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+}
+
+$('voice-transcribe-btn').addEventListener('click', () => _doTranscribe(false));
+$('voice-run-btn').addEventListener('click', () => _doTranscribe(true));
+
+// Browser microphone recording
+$('voice-record-btn').addEventListener('click', async () => {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    voiceChunks = [];
+    voiceMediaRecorder = new MediaRecorder(stream);
+    voiceMediaRecorder.ondataavailable = e => voiceChunks.push(e.data);
+    voiceMediaRecorder.onstop = () => {
+      const blob = new Blob(voiceChunks, { type: 'audio/webm' });
+      voiceAudioBlob = new File([blob], 'recording.webm', { type: 'audio/webm' });
+      const url = URL.createObjectURL(blob);
+      const playback = $('voice-playback');
+      playback.src = url;
+      playback.style.display = 'block';
+      $('voice-record-result').textContent = '✅ Recording ready — click Transcribe above';
+      stream.getTracks().forEach(t => t.stop());
+    };
+    voiceMediaRecorder.start();
+    $('voice-record-btn').disabled = true;
+    $('voice-stop-btn').disabled = false;
+    $('voice-record-result').textContent = '⏺ Recording…';
+  } catch (e) {
+    showToast(`Microphone access denied: ${e.message}`, 'err');
+  }
+});
+
+$('voice-stop-btn').addEventListener('click', () => {
+  if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
+    voiceMediaRecorder.stop();
+    $('voice-record-btn').disabled = false;
+    $('voice-stop-btn').disabled = true;
+  }
+});
+
+document.querySelector('[data-tab="voice"]').addEventListener('click', checkVoiceStatus);
+
+/* ═══════════════════════════════════════
+   TAB — AUTOMATION
+═══════════════════════════════════════ */
+$('briefing-btn').addEventListener('click', async () => {
+  const btn = $('briefing-btn');
+  const box = $('briefing-result');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Generating… <span class="spinner"></span>';
+  box.textContent = 'Fetching news and generating briefing…';
+  try {
+    const note = $('briefing-note').value.trim();
+    const r = await APIJ('/api/automation/briefing', { note });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+    box.textContent = `${data.briefing}\n\n[Generated: ${data.generated_at}]`;
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+  finally { btn.disabled = false; btn.textContent = 'Generate Briefing'; }
+});
+
+async function loadResources() {
+  try {
+    const r = await API('/api/system/resources');
+    const d = await r.json();
+
+    const cards = [
+      { label: 'CPU', value: `${d.cpu_percent}%`, warn: d.cpu_percent > 75, err: d.cpu_percent > 90 },
+      { label: 'RAM', value: `${d.memory_percent}%`, warn: d.memory_percent > 75, err: d.memory_percent > 90 },
+      { label: 'Disk', value: `${d.disk_percent}%`, warn: d.disk_percent > 80, err: d.disk_percent > 90 },
+      { label: 'RAM Used', value: `${d.memory_used_gb} GB` },
+      { label: 'Disk Used', value: `${d.disk_used_gb} GB` },
+      { label: 'Net ↑', value: `${d.net_sent_mb} MB` },
+    ];
+
+    $('resources-grid').innerHTML = cards.map(c => `
+      <div class="resource-card${c.err ? ' err' : c.warn ? ' warn' : ''}">
+        <div class="res-value">${c.value}</div>
+        <div class="res-label">${c.label}</div>
+      </div>`).join('');
+
+    $('top-processes').textContent = 'Top processes:\n' +
+      (d.top_processes || []).map(p =>
+        `${p.name.padEnd(18)} CPU: ${String(p.cpu).padStart(5)}%  MEM: ${String(p.mem).padStart(5)}%  PID: ${p.pid}`
+      ).join('\n');
+  } catch (e) { $('resources-grid').textContent = `Error: ${e.message}`; }
+}
+
+async function updateMonitorStatus() {
+  try {
+    const r = await API('/api/system/monitor');
+    const d = await r.json();
+    $('monitor-status').textContent =
+      d.running
+        ? `✅ Monitor running (every ${d.interval_s}s) | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`
+        : `⏹ Monitor stopped | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`;
+  } catch { }
+}
+
+$('refresh-resources-btn').addEventListener('click', loadResources);
+
+$('monitor-start-btn').addEventListener('click', async () => {
+  await APIJ('/api/system/monitor/start', { interval_s: 60 });
+  updateMonitorStatus();
+  showToast('Resource monitor started', 'ok');
+});
+
+$('monitor-stop-btn').addEventListener('click', async () => {
+  await APIJ('/api/system/monitor/stop', {});
+  updateMonitorStatus();
+  showToast('Monitor stopped', 'ok');
+});
+
+async function runMaintenance(dryRun) {
+  const action = $('maintenance-action').value;
+  const box = $('maintenance-result');
+  box.textContent = dryRun ? 'Running dry run…' : 'Running cleanup…';
+  try {
+    const r = await APIJ('/api/automation/maintenance', { action, dry_run: dryRun });
+    const data = await r.json();
+    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
+
+    const lines = [];
+    const addSection = (title, result) => {
+      if (!result) return;
+      lines.push(`── ${title} ──`);
+      if (result.removed_count !== undefined)
+        lines.push(`Removed: ${result.removed_count} items (${result.total_freed_mb} MB freed)`);
+      if (result.root)
+        lines.push(`Disk: ${result.root.used_gb}/${result.root.total_gb} GB (${result.root.percent}%)`);
+      if (result.error) lines.push(`Error: ${result.error}`);
+    };
+
+    if (data.temp_cleanup) addSection('Temp Files', data.temp_cleanup);
+    if (data.log_cleanup) addSection('Old Logs', data.log_cleanup);
+    if (data.disk_report) addSection('Disk Report', data.disk_report);
+    if (data.removed_count !== undefined) addSection(action, data);
+
+    box.textContent = lines.join('\n') || JSON.stringify(data, null, 2);
+    if (!dryRun) showToast('✅ Maintenance complete', 'ok');
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+}
+
+$('maintenance-dry-btn').addEventListener('click', () => runMaintenance(true));
+$('maintenance-run-btn').addEventListener('click', () => runMaintenance(false));
+
+$('notif-send-btn').addEventListener('click', async () => {
+  const title = $('notif-title').value.trim() || 'AI Agent';
+  const body = $('notif-body').value.trim();
+  if (!body) return showToast('Enter notification body', 'err');
+  const urgency = $('notif-urgency').value;
+  try {
+    const r = await APIJ('/api/system/notify', { title, body, urgency });
+    const data = await r.json();
+    $('notif-result').textContent = data.sent
+      ? `✅ Notification sent: "${title}" — ${body}`
+      : `⚠️ notify-send not available (logged instead)`;
+  } catch (e) { $('notif-result').textContent = `Error: ${e.message}`; }
+});
+
+document.querySelector('[data-tab="automation"]').addEventListener('click', () => {
+  loadResources();
+  updateMonitorStatus();
+});

@@ -1,10 +1,7 @@
-"""Multi-turn chat with the AI agent — maintains conversation history per session."""
+"""Multi-turn chat — maintains per-session history and routes to Claude or Ollama."""
 
 import logging
 import threading
-import uuid
-
-import anthropic
 
 from core.config import config
 
@@ -25,34 +22,45 @@ def _get_or_create(session_id: str) -> list[dict]:
         return _sessions[session_id]
 
 
-def chat(message: str, session_id: str = "default", history: list[dict] | None = None,
-         system_override: str | None = None) -> str:
-    """Send a message and get a reply. Maintains history per session_id."""
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+def chat(
+    message: str,
+    session_id: str = "default",
+    history: list[dict] | None = None,
+    system_override: str | None = None,
+    model: str | None = None,
+) -> str:
+    """
+    Send a message and get a reply.
+
+    Args:
+        message: The user message.
+        session_id: Identifies the conversation session (history is kept per session).
+        history: Explicit history list — if provided, session history is ignored.
+        system_override: Override the default system prompt (used by personas).
+        model: Model to use. Defaults to config.MODEL. Pass an Ollama model name
+               (e.g. "llama3.2") to use a local model instead of Claude.
+
+    Returns:
+        The assistant reply as a string.
+    """
+    from core.model_router import chat as route_chat
 
     if history is not None:
         messages = [m for m in history if m.get("role") in ("user", "assistant")]
+        messages.append({"role": "user", "content": message})
     else:
         messages = _get_or_create(session_id)
         messages.append({"role": "user", "content": message})
 
-    system_text = system_override or _CHAT_SYSTEM
+    system = system_override or _CHAT_SYSTEM
+    model = model or config.MODEL
 
     try:
-        response = client.messages.create(
-            model=config.MODEL,
-            max_tokens=config.MAX_TOKENS,
-            thinking={"type": "adaptive"},
-            system=[
-                {
-                    "type": "text",
-                    "text": system_text,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=messages[-40:],  # keep last 40 turns
-        )
-        reply = next((b.text for b in response.content if b.type == "text"), "")
+        reply = route_chat(messages[-40:], model=model, system=system)
+        if isinstance(reply, str):
+            pass
+        else:
+            reply = "".join(reply)
 
         if history is None:
             with _lock:

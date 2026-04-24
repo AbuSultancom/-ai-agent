@@ -45,6 +45,7 @@ body {
   white-space: nowrap;
 }
 .nav-tabs { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.nav-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .tab-btn {
   background: transparent;
   border: 1px solid var(--border);
@@ -366,3 +367,86 @@ select:focus { border-color: var(--accent); }
   pointer-events: none;
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
+
+/* MODELS GRID */
+.models-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.model-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  transition: border .2s;
+}
+.model-card.active-model { border-color: var(--accent); }
+.model-card .m-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.model-card .m-provider { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.model-card .m-size { color: var(--accent2); font-size: 11px; }
+.model-card .m-actions { margin-top: 8px; display: flex; gap: 6px; }
+
+/* CHAT TOP ROW */
+.chat-top-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.chat-persona-row, .chat-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-persona-row label, .chat-model-row label { color: var(--muted); white-space: nowrap; font-size: 13px; }
+.chat-persona-row select, .chat-model-row select { margin-bottom: 0; width: auto; }
+
+/* GLOBAL MODEL SELECT IN NAVBAR */
+#global-model-select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 10px;
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+  max-width: 180px;
+}
+#global-model-select:focus { border-color: var(--accent); }
+
+/* AGENT CARDS */
+.agent-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+.agent-card .a-emoji { font-size: 28px; margin-bottom: 6px; }
+.agent-card .a-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; color: var(--accent); }
+.agent-card .a-desc { color: var(--muted); font-size: 12px; }
+
+/* AGENT OUTPUT — preserves newlines + colors phase headers */
+#agent-output { white-space: pre-wrap; direction: ltr; text-align: left; }
+
+/* RESOURCE CARDS */
+.resource-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+}
+.resource-card .res-value { font-size: 22px; font-weight: 700; color: var(--accent2); }
+.resource-card .res-label { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.resource-card.warn .res-value { color: var(--warn); }
+.resource-card.err  .res-value { color: var(--err); }
+
+/* VOICE UPLOAD */
+#voice-upload-area { margin-bottom: 0; }
