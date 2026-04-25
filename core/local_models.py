@@ -22,6 +22,8 @@ RECOMMENDED_MODELS = [
     "qwen2.5-coder",
     "codellama",
     "deepseek-r1",
+    "deepseek-v4-flash",
+    "deepseek-v4",
     "phi4",
     "gemma2",
 ]

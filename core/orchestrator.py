@@ -2,8 +2,6 @@ import json
 import logging
 from collections.abc import Generator
 
-import anthropic
-
 from core.config import config
 
 logger = logging.getLogger(__name__)
