@@ -26,10 +26,9 @@ fi
 
 # ── .env check ──────────────────────────────────────────────────────────────
 if [[ ! -f "$REPO_DIR/.env" ]]; then
-  echo "⚠️   No .env found — copying .env.example"
+  echo "⚠️   No .env found — launching configuration wizard…"
   cp "$REPO_DIR/.env.example" "$REPO_DIR/.env"
-  echo "    Edit $REPO_DIR/.env and set ANTHROPIC_API_KEY, then re-run this script."
-  exit 0
+  python3 "$REPO_DIR/scripts/ai-config" --first-run
 fi
 
 # ── Install Python deps ──────────────────────────────────────────────────────
@@ -54,21 +53,36 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl restart "$SERVICE_NAME"
 
-# ── Install CLI wrapper ──────────────────────────────────────────────────────
-echo "🔗  Installing CLI → $CLI_BIN"
+# ── Install CLI wrappers ─────────────────────────────────────────────────────
+echo "🔗  Installing CLI tools…"
 cp "$REPO_DIR/scripts/ai" "$CLI_BIN"
 chmod +x "$CLI_BIN"
+
+cp "$REPO_DIR/scripts/aish" "/usr/local/bin/aish"
+chmod +x "/usr/local/bin/aish"
+
+cp "$REPO_DIR/scripts/ai-config" "/usr/local/bin/ai-config"
+chmod +x "/usr/local/bin/ai-config"
+
+echo "    → /usr/local/bin/ai        (CLI task runner)"
+echo "    → /usr/local/bin/aish      (AI Shell)"
+echo "    → /usr/local/bin/ai-config (configuration manager)"
 
 # ── Done ────────────────────────────────────────────────────────────────────
 sleep 1
 STATUS=$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || echo "unknown")
+PORT=$(grep -E '^PORT=' "$REPO_DIR/.env" 2>/dev/null | cut -d= -f2 | tr -d ' ' || echo "5000")
+PORT="${PORT:-5000}"
+
 if [[ "$STATUS" == "active" ]]; then
   echo ""
   echo "✅  AI Agent service is running!"
-  echo "    Dashboard : http://localhost:5000"
-  echo "    CLI       : ai \"your task here\""
-  echo "    Logs      : ai logs  (or: journalctl -u ai-agent -f)"
-  echo "    Stop      : sudo systemctl stop ai-agent"
+  echo "    Dashboard  : http://localhost:${PORT}"
+  echo "    CLI        : ai \"your task here\""
+  echo "    AI Shell   : aish"
+  echo "    Configure  : ai-config"
+  echo "    Logs       : ai logs  (or: journalctl -u ai-agent -f)"
+  echo "    Stop       : sudo systemctl stop ai-agent"
 else
   echo ""
   echo "⚠️   Service status: $STATUS"
