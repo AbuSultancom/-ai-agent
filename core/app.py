@@ -188,7 +188,8 @@ def run_task_sync():
         return jsonify({"output": output, "status": "completed"})
     except Exception as e:
         logger.exception("Sync task failed")
-        return jsonify({"error": str(e), "status": "failed"}), 500
+        code = 502 if "api_key" in str(e).lower() or "authentication" in str(e).lower() else 500
+        return jsonify({"error": str(e), "status": "failed"}), code
 
 
 @app.route("/api/memory/search", methods=["POST"])
@@ -735,9 +736,12 @@ def api_test_request():
     from tools.api_tester import APITester
     tester = APITester()
     response = tester.request(method, url, data.get("headers"), data.get("body"))
-    analysis = tester.analyze_response(
-        {"method": method, "url": url}, response, data.get("expectations", "")
-    )
+    try:
+        analysis = tester.analyze_response(
+            {"method": method, "url": url}, response, data.get("expectations", "")
+        )
+    except Exception as e:
+        analysis = f"(AI analysis unavailable: {e})"
     return jsonify({"response": response, "analysis": analysis})
 
 
@@ -932,7 +936,8 @@ def agents_run():
         return jsonify(result)
     except Exception as e:
         logger.exception("Multi-agent run failed")
-        return jsonify({"error": str(e)}), 500
+        code = 502 if "api_key" in str(e).lower() or "authentication" in str(e).lower() else 500
+        return jsonify({"error": str(e)}), code
 
 
 @app.route("/api/agents/stream", methods=["POST"])
@@ -1027,7 +1032,8 @@ def automation_briefing():
         return jsonify(result)
     except Exception as e:
         logger.exception("Briefing generation failed")
-        return jsonify({"error": str(e)}), 500
+        code = 502 if "api_key" in str(e).lower() or "authentication" in str(e).lower() else 500
+        return jsonify({"error": str(e)}), code
 
 
 @app.route("/api/automation/maintenance", methods=["POST"])
