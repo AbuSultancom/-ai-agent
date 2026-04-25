@@ -84,8 +84,8 @@ A production-grade autonomous AI agent powered by **Claude Opus 4.7** with an ag
 ### 1. Install
 
 ```bash
-git clone https://github.com/abusultancom/-ai-agent.git
-cd -ai-agent
+git clone https://github.com/abusultancom/-ai-agent.git ai-agent
+cd ai-agent
 pip install -r requirements.txt
 cp .env.example .env
 ```
