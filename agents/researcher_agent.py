@@ -3,9 +3,8 @@
 import logging
 import requests
 from bs4 import BeautifulSoup
-import anthropic
 
-from core.config import config
+from core import model_router
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +30,9 @@ class ResearcherAgent:
     description = "Research analyst — searches, gathers, and synthesizes information"
     emoji = "🔍"
 
-    def __init__(self):
-        self._client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
     def _call(self, messages: list[dict], max_tokens: int = 4096) -> str:
-        resp = self._client.messages.create(
-            model=config.MODEL,
-            max_tokens=max_tokens,
-            system=_SYSTEM,
-            messages=messages,
-        )
-        return "".join(b.text for b in resp.content if b.type == "text")
+        result = model_router.chat(messages, system=_SYSTEM, max_tokens=max_tokens)
+        return result if isinstance(result, str) else "".join(result)
 
     def _fetch_url(self, url: str, timeout: int = 10) -> str:
         """Fetch and extract text from a URL."""

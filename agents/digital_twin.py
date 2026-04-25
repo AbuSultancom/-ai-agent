@@ -18,8 +18,7 @@ import time
 from pathlib import Path
 from typing import Iterator
 
-import anthropic
-
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -83,7 +82,6 @@ class DigitalTwin:
 
     def __init__(self, user_name: str = "the user", chromadb_path: str = ""):
         self._name = user_name
-        self._client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         self._profile: dict = {}
         self._lock = threading.Lock()
         self._ingestion_log: list[dict] = []
@@ -151,13 +149,13 @@ class DigitalTwin:
 
     def _extract_and_merge_profile(self, prompt: str, source: str) -> dict:
         try:
-            resp = self._client.messages.create(
-                model=config.MODEL,
-                max_tokens=2000,
+            text = model_router.chat(
+                [{"role": "user", "content": prompt}],
                 system=_PROFILER_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
             )
-            text = "".join(b.text for b in resp.content if b.type == "text")
+            if not isinstance(text, str):
+                text = "".join(text)
             start, end = text.find("{"), text.rfind("}") + 1
             new_profile = json.loads(text[start:end]) if start >= 0 else {}
 
@@ -231,38 +229,31 @@ class DigitalTwin:
         )
 
         if stream:
-            return self._stream_response(question, system)
+            return model_router.chat(
+                [{"role": "user", "content": question}],
+                system=system,
+                max_tokens=3000,
+                stream=True,
+            )
 
-        resp = self._client.messages.create(
-            model=config.MODEL,
-            max_tokens=3000,
+        result = model_router.chat(
+            [{"role": "user", "content": question}],
             system=system,
-            messages=[{"role": "user", "content": question}],
+            max_tokens=3000,
         )
-        return "".join(b.text for b in resp.content if b.type == "text")
-
-    def _stream_response(self, question: str, system: str) -> Iterator[str]:
-        with self._client.messages.stream(
-            model=config.MODEL,
-            max_tokens=3000,
-            system=system,
-            messages=[{"role": "user", "content": question}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield text
+        return result if isinstance(result, str) else "".join(result)
 
     # ── Probing Engine ────────────────────────────────────────────────────────
 
     def generate_probing_question(self) -> str:
         """Generate a question designed to reveal the user's thinking patterns."""
         profile_summary = json.dumps(self._profile, ensure_ascii=False)[:3000] if self._profile else "No profile yet."
-        resp = self._client.messages.create(
-            model=config.MODEL,
-            max_tokens=200,
+        result = model_router.chat(
+            [{"role": "user", "content": f"What I know about the user so far:\n{profile_summary}"}],
             system=_PROBING_SYSTEM,
-            messages=[{"role": "user", "content": f"What I know about the user so far:\n{profile_summary}"}],
+            max_tokens=200,
         )
-        return "".join(b.text for b in resp.content if b.type == "text").strip()
+        return (result if isinstance(result, str) else "".join(result)).strip()
 
     def record_answer(self, question: str, answer: str):
         """Store a probing Q&A pair to deepen the profile."""
@@ -281,13 +272,12 @@ class DigitalTwin:
         """Return a natural language summary of the user profile."""
         if not self._profile:
             return "Profile not built yet. Ingest some of your code or documents to start."
-        resp = self._client.messages.create(
-            model=config.MODEL,
-            max_tokens=500,
+        result = model_router.chat(
+            [{"role": "user", "content": json.dumps(self._profile, ensure_ascii=False)}],
             system="Summarize the provided user profile in 3-4 sentences. Be specific and insightful.",
-            messages=[{"role": "user", "content": json.dumps(self._profile, ensure_ascii=False)}],
+            max_tokens=500,
         )
-        return "".join(b.text for b in resp.content if b.type == "text")
+        return result if isinstance(result, str) else "".join(result)
 
     def get_ingestion_log(self) -> list[dict]:
         return list(reversed(self._ingestion_log[-50:]))

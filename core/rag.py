@@ -7,9 +7,9 @@ import re
 import uuid
 from collections import defaultdict
 
-import anthropic
 import chromadb
 
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,6 @@ class RAGEngine:
         self._collection = self._client.get_or_create_collection(
             name=RAG_COLLECTION, metadata={"hnsw:space": "cosine"}
         )
-        self._llm = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
     def ingest_file(self, file) -> dict:
         name = os.path.basename(file.filename)
@@ -115,14 +114,12 @@ class RAGEngine:
 
 الإجابة:"""
 
-        response = self._llm.messages.create(
-            model=config.MODEL,
+        result = model_router.chat(
+            [{"role": "user", "content": prompt}],
+            system="You are a precise document Q&A assistant.",
             max_tokens=2048,
-            thinking={"type": "adaptive"},
-            system=[{"type": "text", "text": "You are a precise document Q&A assistant.", "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user", "content": prompt}],
         )
-        return next((b.text for b in response.content if b.type == "text"), "لا إجابة")
+        return result if isinstance(result, str) else "".join(result) or "No answer found"
 
     def list_documents(self) -> list[dict]:
         if self._collection.count() == 0:

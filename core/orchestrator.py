@@ -210,7 +210,6 @@ def _build_tool_definitions() -> list[dict]:
 
 class AIOrchestrator:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         self.tools = _build_tool_definitions()
         self._os_tools = None
         self._web_tools = None
@@ -292,55 +291,41 @@ class AIOrchestrator:
 
     def run_task(self, task: str) -> Generator[str, None, None]:
         """Run a task and yield text chunks as they become available."""
+        from core import model_router
         messages: list[dict] = [{"role": "user", "content": task}]
-        system = [
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        model = config.MODEL
 
         for iteration in range(config.MAX_AGENT_ITERATIONS):
-            with self.client.messages.stream(
-                model=config.MODEL,
-                max_tokens=config.MAX_TOKENS,
-                thinking={"type": "adaptive"},
-                system=system,
-                tools=self.tools,
-                messages=messages,
-            ) as stream:
-                response = stream.get_final_message()
+            response = model_router.chat_with_tools(
+                messages,
+                self.tools,
+                model=model,
+                system=SYSTEM_PROMPT,
+            )
 
-            # Yield text blocks to caller
-            for block in response.content:
-                if block.type == "text" and block.text:
-                    yield block.text
+            if response["text"]:
+                yield response["text"]
 
-            if response.stop_reason == "end_turn":
+            if response["stop_reason"] == "end_turn":
                 break
 
-            if response.stop_reason != "tool_use":
-                logger.warning("Unexpected stop_reason: %s", response.stop_reason)
+            if response["stop_reason"] != "tool_use":
+                logger.warning("Unexpected stop_reason: %s", response["stop_reason"])
                 break
 
-            # Execute all tool calls in this turn
-            messages.append({"role": "assistant", "content": response.content})
+            # Add assistant turn to history
+            messages.append(response["_history_assistant"])
+
+            # Execute tool calls
             tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    preview = json.dumps(block.input, ensure_ascii=False)[:120]
-                    yield f"\n\n**[{block.name}]** `{preview}`\n"
-                    result = self._dispatch_tool(block.name, block.input)
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": result,
-                        }
-                    )
+            for tc in response["tool_calls"]:
+                preview = json.dumps(tc["inputs"], ensure_ascii=False)[:120]
+                yield f"\n\n**[{tc['name']}]** `{preview}`\n"
+                result = self._dispatch_tool(tc["name"], tc["inputs"])
+                tool_results.append({"id": tc["id"], "result": result})
 
-            messages.append({"role": "user", "content": tool_results})
+            # Add tool results in the right backend format
+            messages.extend(model_router.build_tool_result_messages(tool_results, model))
 
             if iteration == config.MAX_AGENT_ITERATIONS - 1:
                 yield "\n\n[Max iterations reached]"

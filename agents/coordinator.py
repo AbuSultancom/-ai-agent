@@ -15,12 +15,10 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Iterator
 
-import anthropic
-
 from agents.coder_agent import CoderAgent
 from agents.researcher_agent import ResearcherAgent
 from agents.analyst_agent import AnalystAgent
-from core.config import config
+from core import model_router
 
 logger = logging.getLogger(__name__)
 
@@ -47,22 +45,21 @@ class MultiAgentCoordinator:
             "researcher": ResearcherAgent(),
             "analyst": AnalystAgent(),
         }
-        self._client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         self._history: list[dict] = []
         self._lock = threading.Lock()
 
     # ── Routing ───────────────────────────────────────────────────────────────
 
     def _route(self, task: str) -> dict:
-        """Ask Claude which agents should handle this task."""
+        """Ask LLM which agents should handle this task."""
         try:
-            resp = self._client.messages.create(
-                model=config.MODEL,
-                max_tokens=256,
+            text = model_router.chat(
+                [{"role": "user", "content": task}],
                 system=_ROUTER_SYSTEM,
-                messages=[{"role": "user", "content": task}],
+                max_tokens=256,
             )
-            text = "".join(b.text for b in resp.content if b.type == "text")
+            if not isinstance(text, str):
+                text = "".join(text)
             start = text.find("{")
             end = text.rfind("}") + 1
             if start >= 0:

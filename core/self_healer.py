@@ -24,8 +24,6 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
-import anthropic
-
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -71,7 +69,6 @@ class SelfHealer:
     """Analyzes runtime errors and applies code patches automatically."""
 
     def __init__(self):
-        self._client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         _BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
     # ── Analysis ──────────────────────────────────────────────────────────────
@@ -111,13 +108,14 @@ class SelfHealer:
         )
 
         try:
-            resp = self._client.messages.create(
-                model=config.MODEL,
-                max_tokens=2048,
+            from core import model_router
+            text = model_router.chat(
+                [{"role": "user", "content": prompt}],
                 system=_HEALER_SYSTEM,
-                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2048,
             )
-            text = "".join(b.text for b in resp.content if b.type == "text")
+            if not isinstance(text, str):
+                text = "".join(text)
             import json
             start = text.find("{")
             end = text.rfind("}") + 1
