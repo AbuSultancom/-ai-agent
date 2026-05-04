@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}MyStore{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    [lang="ar"] { font-family: 'Tajawal', sans-serif; }
+    [lang="en"] { font-family: 'Inter', sans-serif; }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .scrollbar-hide::-webkit-scrollbar { display: none; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.3s ease forwards; }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen flex flex-col">
+
+<!-- ── Navbar ──────────────────────────────────────────────────────────── -->
+<nav class="bg-white shadow-sm sticky top-0 z-40 border-b border-gray-100">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+
+      <!-- Logo -->
+      <a href="/store" class="flex items-center gap-2">
+        <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+          </svg>
+        </div>
+        <span class="text-lg font-bold text-gray-900">MyStore</span>
+      </a>
+
+      <!-- Search bar (desktop) -->
+      <div class="hidden md:flex flex-1 max-w-xl mx-8">
+        <div class="relative w-full">
+          <input id="nav-search" type="text" data-i18n="search_placeholder"
+            class="w-full border border-gray-200 rounded-xl px-4 py-2 ps-10 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-gray-50"
+            onkeydown="if(event.key==='Enter') window.location.href='/store/products?search='+this.value">
+          <svg class="w-4 h-4 text-gray-400 absolute top-2.5 start-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Nav links -->
+      <div class="flex items-center gap-4">
+        <a href="/store" class="hidden md:block text-sm font-medium text-gray-600 hover:text-indigo-600 transition-colors" data-i18n="home"></a>
+        <a href="/store/products" class="hidden md:block text-sm font-medium text-gray-600 hover:text-indigo-600 transition-colors" data-i18n="products"></a>
+
+        <!-- Language toggle -->
+        <button onclick="window.store.toggleLang()"
+          class="text-sm font-medium text-gray-600 hover:text-indigo-600 border border-gray-200 rounded-lg px-3 py-1.5 transition-colors"
+          data-i18n="lang_toggle"></button>
+
+        <!-- Cart -->
+        <a href="/store/cart" class="relative">
+          <div class="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-gray-100 transition-colors">
+            <svg class="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+            <span class="cart-badge absolute -top-1 -end-1 bg-indigo-600 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center font-bold" style="display:none">0</span>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Main ────────────────────────────────────────────────────────────── -->
+<main class="flex-1">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- ── Footer ──────────────────────────────────────────────────────────── -->
+<footer class="bg-gray-900 text-gray-300 mt-16">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div>
+        <div class="flex items-center gap-2 mb-3">
+          <div class="w-7 h-7 bg-indigo-500 rounded-lg flex items-center justify-center">
+            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"/>
+            </svg>
+          </div>
+          <span class="font-bold text-white text-lg">MyStore</span>
+        </div>
+        <p class="text-sm" data-i18n="footer_tagline"></p>
+        <p class="text-xs mt-2 text-indigo-400" data-i18n="powered_by"></p>
+      </div>
+      <div>
+        <h4 class="font-semibold text-white mb-3" data-i18n="footer_links"></h4>
+        <ul class="space-y-2 text-sm">
+          <li><a href="/store" class="hover:text-white transition-colors" data-i18n="home"></a></li>
+          <li><a href="/store/products" class="hover:text-white transition-colors" data-i18n="products"></a></li>
+          <li><a href="/store/cart" class="hover:text-white transition-colors" data-i18n="cart"></a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="font-semibold text-white mb-3" data-i18n="footer_contact"></h4>
+        <p class="text-sm">support@mystore.com</p>
+        <div class="flex gap-2 mt-4">
+          <span class="text-xs bg-green-900 text-green-300 px-2 py-1 rounded-full">Shopify</span>
+          <span class="text-xs bg-orange-900 text-orange-300 px-2 py-1 rounded-full">سلة Salla</span>
+          <span class="text-xs bg-purple-900 text-purple-300 px-2 py-1 rounded-full">زد Zid</span>
+        </div>
+      </div>
+    </div>
+    <div class="border-t border-gray-800 mt-8 pt-6 text-center text-xs text-gray-500">
+      © 2024 MyStore — <span data-i18n="rights"></span>
+    </div>
+  </div>
+</footer>
+
+<script src="/static/store/i18n.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

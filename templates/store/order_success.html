@@ -1,0 +1,30 @@
+{% extends "store/base.html" %}
+{% block title %}Order Placed — MyStore{% endblock %}
+{% block content %}
+<div class="max-w-lg mx-auto px-4 py-20 text-center">
+  <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+    <svg class="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+    </svg>
+  </div>
+  <h1 class="text-3xl font-extrabold text-gray-900 mb-3" data-i18n="order_success"></h1>
+  <p class="text-gray-500 mb-6" data-i18n="order_success_msg"></p>
+  <div id="order-number-box" class="bg-indigo-50 rounded-2xl px-6 py-4 inline-block mb-8">
+    <p class="text-xs text-gray-400 mb-1" data-i18n="order_number"></p>
+    <p id="order-num" class="text-xl font-bold text-indigo-600"></p>
+  </div>
+  <div class="flex flex-col sm:flex-row gap-3 justify-center">
+    <a href="/store" class="bg-indigo-600 text-white font-semibold px-8 py-3 rounded-xl hover:bg-indigo-700 transition-colors" data-i18n="back_home"></a>
+    <a href="/store/products" class="border border-gray-200 text-gray-700 font-semibold px-8 py-3 rounded-xl hover:bg-gray-50 transition-colors" data-i18n="continue_shopping"></a>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const p = new URLSearchParams(window.location.search);
+  const num = p.get("order") || "";
+  document.getElementById("order-num").textContent = num;
+});
+</script>
+{% endblock %}

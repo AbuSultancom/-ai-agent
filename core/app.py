@@ -23,10 +23,16 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 from ecommerce.models import db as ecommerce_db
 from ecommerce.routes import ecommerce_bp
 from ecommerce.shopify.routes import shopify_bp
+from ecommerce.salla.routes import salla_bp
+from ecommerce.zid.routes import zid_bp
+from ecommerce.store_routes import store_bp
 
 ecommerce_db.init_app(app)
 app.register_blueprint(ecommerce_bp)
 app.register_blueprint(shopify_bp)
+app.register_blueprint(salla_bp)
+app.register_blueprint(zid_bp)
+app.register_blueprint(store_bp)
 
 with app.app_context():
     ecommerce_db.create_all()

@@ -31,6 +31,13 @@ class Config:
     # ── E-commerce Database ────────────────────────────────────────────────────
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/ecommerce.db")
 
+    # ── Salla ──────────────────────────────────────────────────────────────────
+    SALLA_ACCESS_TOKEN: str = os.getenv("SALLA_ACCESS_TOKEN", "")
+
+    # ── Zid ────────────────────────────────────────────────────────────────────
+    ZID_ACCESS_TOKEN: str = os.getenv("ZID_ACCESS_TOKEN", "")
+    ZID_STORE_ID: str = os.getenv("ZID_STORE_ID", "")
+
     # ── Shopify ────────────────────────────────────────────────────────────────
     SHOPIFY_STORE_DOMAIN: str = os.getenv("SHOPIFY_STORE_DOMAIN", "")       # e.g. my-store.myshopify.com
     SHOPIFY_ACCESS_TOKEN: str = os.getenv("SHOPIFY_ACCESS_TOKEN", "")       # Admin API access token

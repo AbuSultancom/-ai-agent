@@ -1,0 +1,170 @@
+{% extends "store/base.html" %}
+{% block title %}Products — MyStore{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+  <div class="flex flex-col lg:flex-row gap-8">
+
+    <!-- ── Sidebar filters ────────────────────────────────────────────────── -->
+    <aside class="w-full lg:w-64 shrink-0">
+      <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sticky top-20">
+        <h3 class="font-bold text-gray-800 mb-4" data-i18n="filter"></h3>
+
+        <!-- Search (mobile) -->
+        <div class="relative mb-4 lg:hidden">
+          <input id="search-input-m" type="text" data-i18n="search_placeholder"
+            class="w-full border border-gray-200 rounded-xl px-4 py-2 ps-9 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+          <svg class="w-4 h-4 text-gray-400 absolute top-2.5 start-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+
+        <!-- Source filter -->
+        <div class="mb-5">
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block" data-i18n="source"></label>
+          <select id="source-filter" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+            <option value="" data-i18n="all_sources"></option>
+            <option value="local">Local</option>
+            <option value="shopify">Shopify</option>
+            <option value="salla">Salla سلة</option>
+            <option value="zid">Zid زد</option>
+          </select>
+        </div>
+
+        <!-- Price range -->
+        <div class="mb-5">
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block" data-i18n="price_range"></label>
+          <div class="flex gap-2">
+            <input id="min-price" type="number" data-i18n="min" class="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" min="0">
+            <input id="max-price" type="number" data-i18n="max" class="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" min="0">
+          </div>
+        </div>
+
+        <!-- Sort -->
+        <div class="mb-5">
+          <label class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block" data-i18n="sort_by"></label>
+          <select id="sort-filter" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+            <option value="newest" data-i18n="sort_newest"></option>
+            <option value="price_asc" data-i18n="sort_price_asc"></option>
+            <option value="price_desc" data-i18n="sort_price_desc"></option>
+            <option value="name" data-i18n="sort_name"></option>
+          </select>
+        </div>
+
+        <div class="flex gap-2">
+          <button id="apply-filters" onclick="applyFilters()"
+            class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 rounded-xl transition-colors"
+            data-i18n="apply"></button>
+          <button onclick="resetFilters()"
+            class="flex-1 border border-gray-200 text-gray-600 text-sm font-semibold py-2 rounded-xl hover:bg-gray-50 transition-colors"
+            data-i18n="reset"></button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Products area ──────────────────────────────────────────────────── -->
+    <div class="flex-1">
+      <!-- top bar -->
+      <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+        <h1 class="text-2xl font-bold text-gray-900" data-i18n="all_products"></h1>
+        <!-- Desktop search -->
+        <div class="relative hidden lg:block">
+          <input id="search-input" type="text" data-i18n="search_placeholder"
+            class="border border-gray-200 rounded-xl px-4 py-2 ps-9 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            onkeydown="if(event.key==='Enter') applyFilters()">
+          <svg class="w-4 h-4 text-gray-400 absolute top-2.5 start-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
+        <span id="total-count" class="text-sm text-gray-500"></span>
+      </div>
+
+      <!-- grid -->
+      <div id="products-grid" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+
+      <!-- pagination -->
+      <div id="pagination" class="flex justify-center gap-2 mt-10"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+const params = new URLSearchParams(window.location.search);
+
+// pre-fill search from URL
+if (params.get("search")) {
+  document.getElementById("search-input").value = params.get("search");
+}
+
+async function loadProducts(page = 1) {
+  currentPage = page;
+  const grid = document.getElementById("products-grid");
+  grid.innerHTML = Array(8).fill(`<div class="bg-gray-100 rounded-2xl h-64 animate-pulse"></div>`).join("");
+
+  const search  = document.getElementById("search-input")?.value || document.getElementById("search-input-m")?.value || "";
+  const source  = document.getElementById("source-filter").value;
+  const minP    = document.getElementById("min-price").value;
+  const maxP    = document.getElementById("max-price").value;
+  const sort    = document.getElementById("sort-filter").value;
+
+  const qp = { page, limit: 20 };
+  if (search)  qp.search = search;
+  if (source)  qp.source = source;
+  if (minP)    qp.min_price = minP;
+  if (maxP)    qp.max_price = maxP;
+
+  try {
+    const r = await window.store.fetchProducts(qp);
+    let products = r.data || [];
+
+    // client-side sort
+    if (sort === "price_asc")  products.sort((a,b) => a.price - b.price);
+    if (sort === "price_desc") products.sort((a,b) => b.price - a.price);
+    if (sort === "name")       products.sort((a,b) => a.name.localeCompare(b.name));
+
+    const total = r.total || products.length;
+    document.getElementById("total-count").textContent = `${total} ${window.store.t("items")}`;
+
+    if (products.length === 0) {
+      grid.innerHTML = `<div class="col-span-4 text-center text-gray-400 py-20"><div class="text-5xl mb-4">🔍</div><p>${window.store.t("no_products")}</p></div>`;
+    } else {
+      grid.innerHTML = products.map(p => window.store.productCard(p)).join("");
+      grid.querySelectorAll(".fade-in-item").forEach((el, i) => {
+        el.style.animationDelay = `${i * 0.04}s`;
+      });
+    }
+
+    // pagination
+    renderPagination(r.pages || 1, page);
+  } catch(e) {
+    grid.innerHTML = `<div class="col-span-4 text-center text-red-400 py-12">${window.store.t("error_loading")}</div>`;
+  }
+}
+
+function renderPagination(pages, current) {
+  const container = document.getElementById("pagination");
+  if (pages <= 1) { container.innerHTML = ""; return; }
+  let html = "";
+  for (let i = 1; i <= pages; i++) {
+    html += `<button onclick="loadProducts(${i})"
+      class="w-9 h-9 rounded-lg text-sm font-medium ${i === current ? "bg-indigo-600 text-white" : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"}">${i}</button>`;
+  }
+  container.innerHTML = html;
+}
+
+function applyFilters() { loadProducts(1); }
+function resetFilters() {
+  document.getElementById("search-input").value = "";
+  document.getElementById("source-filter").value = "";
+  document.getElementById("min-price").value = "";
+  document.getElementById("max-price").value = "";
+  document.getElementById("sort-filter").value = "newest";
+  loadProducts(1);
+}
+
+document.addEventListener("DOMContentLoaded", () => loadProducts(1));
+</script>
+{% endblock %}
