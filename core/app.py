@@ -16,6 +16,18 @@ import os
 app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), '..', 'templates'),
             static_folder=os.path.join(os.path.dirname(__file__), '..', 'static'))
 app.config["SECRET_KEY"] = config.SECRET_KEY
+app.config["SQLALCHEMY_DATABASE_URI"] = config.DATABASE_URL
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# ── E-commerce (SQLAlchemy + blueprint) ──────────────────────────────────────
+from ecommerce.models import db as ecommerce_db
+from ecommerce.routes import ecommerce_bp
+
+ecommerce_db.init_app(app)
+app.register_blueprint(ecommerce_bp)
+
+with app.app_context():
+    ecommerce_db.create_all()
 
 
 @app.route("/")

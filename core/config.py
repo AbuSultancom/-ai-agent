@@ -28,5 +28,8 @@ class Config:
     # ── Memory ─────────────────────────────────────────────────────────────────
     CHROMADB_PATH: str = os.getenv("CHROMADB_PATH", "./data/chromadb")
 
+    # ── E-commerce Database ────────────────────────────────────────────────────
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/ecommerce.db")
+
 
 config = Config()
