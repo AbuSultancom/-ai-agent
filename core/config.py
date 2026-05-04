@@ -31,5 +31,11 @@ class Config:
     # ── E-commerce Database ────────────────────────────────────────────────────
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./data/ecommerce.db")
 
+    # ── Shopify ────────────────────────────────────────────────────────────────
+    SHOPIFY_STORE_DOMAIN: str = os.getenv("SHOPIFY_STORE_DOMAIN", "")       # e.g. my-store.myshopify.com
+    SHOPIFY_ACCESS_TOKEN: str = os.getenv("SHOPIFY_ACCESS_TOKEN", "")       # Admin API access token
+    SHOPIFY_API_VERSION: str = os.getenv("SHOPIFY_API_VERSION", "2024-01")
+    SHOPIFY_WEBHOOK_SECRET: str = os.getenv("SHOPIFY_WEBHOOK_SECRET", "")   # for HMAC verification
+
 
 config = Config()
