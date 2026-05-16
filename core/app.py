@@ -19,6 +19,20 @@ app = Flask(__name__, template_folder=os.path.join(os.path.dirname(__file__), '.
 app.config["SECRET_KEY"] = config.SECRET_KEY
 
 
+def _start_telegram_bot() -> None:
+    """Auto-start Telegram polling if token + chat_id are configured."""
+    try:
+        from core.telegram_bot import start
+        if start(config.TELEGRAM_TOKEN, config.TELEGRAM_CHAT_ID):
+            logger.info("Telegram bot polling started")
+    except Exception as exc:
+        logger.warning("Telegram bot startup failed: %s", exc)
+
+
+# Start Telegram bot in background when the app loads
+threading.Thread(target=_start_telegram_bot, daemon=True).start()
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -990,6 +1004,19 @@ def save_settings():
         config.OLLAMA_URL = os.environ.get("OLLAMA_URL", config.OLLAMA_URL)
     if "LOCAL_MODEL" in updated:
         config.LOCAL_MODEL = os.environ.get("LOCAL_MODEL", config.LOCAL_MODEL)
+
+    # Restart Telegram bot if token/chat changed
+    if updated & {"TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"}:
+        try:
+            from core.telegram_bot import stop, start
+            stop()
+            threading.Thread(
+                target=lambda: start(config.TELEGRAM_TOKEN, config.TELEGRAM_CHAT_ID),
+                daemon=True,
+            ).start()
+            logger.info("Telegram bot restarted with new credentials")
+        except Exception as exc:
+            logger.warning("Telegram bot restart failed: %s", exc)
 
     return jsonify({"ok": True, "updated": list(updated)})
 
