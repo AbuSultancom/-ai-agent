@@ -1372,7 +1372,12 @@ def smart_stream():
                     if text_buf.strip():
                         yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
                         text_buf = ""
-                    yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
+                    tool_name = m.group(1)
+                    tool_args = m.group(2)
+                    if tool_name == "screenshot_image":
+                        yield f"data: {json.dumps({'type':'image','url':tool_args}, ensure_ascii=False)}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type':'tool','name':tool_name,'args':tool_args}, ensure_ascii=False)}\n\n"
                 else:
                     text_buf += chunk
                     if len(text_buf) >= 40:

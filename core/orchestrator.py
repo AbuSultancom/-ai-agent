@@ -13,9 +13,16 @@ You have access to these tools:
 - **read_file**: Read any file's contents
 - **write_file**: Write or append content to files
 - **search_files**: Find files matching a glob pattern
-- **web_fetch**: Fetch and extract content from a URL
+- **web_fetch**: Fetch and extract content from a URL (fast, text-only)
+- **browser_screenshot**: Open a URL in a real browser and take a screenshot — use when you need to SEE a page visually
+- **browser_get_text**: Open a URL in a real browser and extract all visible text (handles JS-rendered pages)
+- **browser_click**: Navigate to a URL, click an element by CSS selector, return updated text
+- **browser_fill_form**: Navigate to a URL, fill form fields and submit — returns final URL + screenshot
 - **memory_store**: Persist information for future sessions
 - **memory_search**: Semantic search over stored memories
+
+When the user says "open X", "browse to X", "show me X website", "take a screenshot of X", or similar — always use browser_screenshot.
+When extracting content from a JS-heavy page, prefer browser_get_text over web_fetch.
 
 How to approach tasks:
 1. Break complex tasks into concrete steps
@@ -203,6 +210,57 @@ def _build_tool_definitions() -> list[dict]:
                 "required": ["code"],
             },
         },
+        {
+            "name": "browser_screenshot",
+            "description": "Open a URL in a real Chromium browser and take a screenshot. Use when the user asks to open/browse/show a website, or when you need to visually inspect a page. Returns a screenshot URL.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL to navigate to (include https://)"},
+                    "full_page": {"type": "boolean", "description": "Capture full scrollable page (default true)", "default": True},
+                },
+                "required": ["url"],
+            },
+        },
+        {
+            "name": "browser_get_text",
+            "description": "Open a URL in a real browser and extract all visible text. Handles JavaScript-rendered pages that web_fetch cannot read.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL to navigate to"},
+                },
+                "required": ["url"],
+            },
+        },
+        {
+            "name": "browser_click",
+            "description": "Navigate to a URL, click an element matching a CSS selector, and return the updated page text.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL to navigate to"},
+                    "selector": {"type": "string", "description": "CSS selector of the element to click"},
+                },
+                "required": ["url", "selector"],
+            },
+        },
+        {
+            "name": "browser_fill_form",
+            "description": "Navigate to a URL, fill form fields by CSS selector, optionally submit, and return the result with a screenshot.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Full URL to navigate to"},
+                    "fields": {
+                        "type": "object",
+                        "description": "Map of CSS selector → value to type, e.g. {\"#search\": \"python\"}"
+                    },
+                    "submit_selector": {"type": "string", "description": "CSS selector to click for submission (optional)", "default": ""},
+                },
+                "required": ["url", "fields"],
+            },
+        },
     ]
 
 
@@ -213,6 +271,7 @@ class AIOrchestrator:
         self._web_tools = None
         self._file_tools = None
         self._memory = None
+        self._browser_tools = None
 
     # Lazy-load tools to avoid circular imports and heavy init at startup
     @property
@@ -242,6 +301,13 @@ class AIOrchestrator:
             from memory.memory_manager import MemoryManager
             self._memory = MemoryManager(config.CHROMADB_PATH)
         return self._memory
+
+    @property
+    def browser_tools(self):
+        if self._browser_tools is None:
+            from tools.browser_tools import BrowserTools
+            self._browser_tools = BrowserTools()
+        return self._browser_tools
 
     def _dispatch_tool(self, name: str, inputs: dict) -> str:
         try:
@@ -282,6 +348,18 @@ class AIOrchestrator:
                 sandbox = CodeSandbox()
                 result = sandbox.execute(inputs["code"], inputs.get("timeout", 15))
                 return sandbox.format_result(result)
+            if name == "browser_screenshot":
+                result = self.browser_tools.screenshot(inputs["url"], inputs.get("full_page", True))
+                return json.dumps({"screenshot_url": result["url"], "path": result["path"]})
+            if name == "browser_get_text":
+                return self.browser_tools.get_text(inputs["url"])
+            if name == "browser_click":
+                return self.browser_tools.click_and_get(inputs["url"], inputs["selector"])
+            if name == "browser_fill_form":
+                result = self.browser_tools.fill_form(
+                    inputs["url"], inputs["fields"], inputs.get("submit_selector", "")
+                )
+                return json.dumps(result)
             return f"Unknown tool: {name}"
         except Exception as exc:
             logger.warning("Tool %s raised: %s", name, exc)
@@ -321,6 +399,12 @@ class AIOrchestrator:
                 yield f"\n\n**[{tc['name']}]** `{preview}`\n"
                 result = self._dispatch_tool(tc["name"], tc["inputs"])
                 tool_results.append({"id": tc["id"], "result": result})
+                if tc["name"] == "browser_screenshot":
+                    try:
+                        shot = json.loads(result)
+                        yield f"\n\n**[screenshot_image]** `{shot.get('screenshot_url', '')}`\n"
+                    except Exception:
+                        pass
 
             # Add tool results in the right backend format
             messages.extend(model_router.build_tool_result_messages(tool_results, model))
@@ -352,6 +436,12 @@ class AIOrchestrator:
                 yield f"\n\n**[{tc['name']}]** `{preview}`\n"
                 result = self._dispatch_tool(tc["name"], tc["inputs"])
                 tool_results.append({"id": tc["id"], "result": result})
+                if tc["name"] == "browser_screenshot":
+                    try:
+                        shot = json.loads(result)
+                        yield f"\n\n**[screenshot_image]** `{shot.get('screenshot_url', '')}`\n"
+                    except Exception:
+                        pass
             msgs.extend(model_router.build_tool_result_messages(tool_results, model))
             if iteration == config.MAX_AGENT_ITERATIONS - 1:
                 yield "\n\n[Max iterations reached]"
