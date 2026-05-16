@@ -66,7 +66,46 @@
 </div>
 <div id="history-overlay" class="history-overlay hidden"></div>
 
+<!-- File explorer sidebar -->
+<div id="explorer-panel" class="explorer-panel hidden">
+  <div class="explorer-header">
+    <span>📁 Files</span>
+    <button class="icon-btn" id="explorer-close-btn">✕</button>
+  </div>
+  <div id="explorer-tree" class="explorer-tree">Loading…</div>
+</div>
+<div id="explorer-overlay" class="explorer-overlay hidden"></div>
+
+<!-- Terminal panel -->
+<div id="terminal-panel" class="terminal-panel hidden">
+  <div class="terminal-header">
+    <span>⚡ Terminal</span>
+    <div style="display:flex;gap:6px">
+      <button class="icon-btn" id="terminal-clear-btn" title="Clear">🗑</button>
+      <button class="icon-btn" id="terminal-close-btn">✕</button>
+    </div>
+  </div>
+  <div id="terminal-output" class="terminal-output"></div>
+  <div class="terminal-input-row">
+    <span class="terminal-prompt">$</span>
+    <input id="terminal-input" class="terminal-input" placeholder="run a command…" autocomplete="off">
+    <button class="icon-btn" id="terminal-run-btn">▶</button>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
+
+<!-- Command palette -->
+<div id="cmd-overlay" class="cmd-overlay hidden">
+  <div class="cmd-palette">
+    <input id="cmd-input" class="cmd-input" placeholder="Type a command or action…" autocomplete="off">
+    <div id="cmd-list" class="cmd-list"></div>
+  </div>
+</div>
+
 <script src="/static/js/main.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 </body>
 </html>

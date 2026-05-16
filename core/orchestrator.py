@@ -20,6 +20,9 @@ You have access to these tools:
 - **browser_fill_form**: Navigate to a URL, fill form fields and submit — returns final URL + screenshot
 - **memory_store**: Persist information for future sessions
 - **memory_search**: Semantic search over stored memories
+- **web_search**: Search the web in real-time via DuckDuckGo — use for current events, facts, news
+- **git**: Git operations (status/diff/log/commit/push/pull) — use when user asks about code changes
+- **doc_search**: Search over uploaded documents using semantic similarity
 
 When the user says "open X", "browse to X", "show me X website", "take a screenshot of X", or similar — always use browser_screenshot.
 When extracting content from a JS-heavy page, prefer browser_get_text over web_fetch.
@@ -211,6 +214,50 @@ def _build_tool_definitions() -> list[dict]:
             },
         },
         {
+            "name": "web_search",
+            "description": "Search the web via DuckDuckGo and return top results with titles, URLs, and snippets. Use for current events, facts, or anything needing real-time information.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "max_results": {"type": "integer", "description": "Number of results (default 8)", "default": 8},
+                    "news": {"type": "boolean", "description": "Search news instead of web (default false)", "default": False},
+                },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "git",
+            "description": "Run git operations: status, diff, log, add, commit, push, pull, branches.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "diff", "log", "add", "commit", "push", "pull", "branches"],
+                        "description": "Git operation to perform",
+                    },
+                    "path": {"type": "string", "description": "File path for diff/add"},
+                    "message": {"type": "string", "description": "Commit message"},
+                    "n": {"type": "integer", "description": "Number of log entries", "default": 10},
+                    "branch": {"type": "string", "description": "Branch name for push"},
+                },
+                "required": ["action"],
+            },
+        },
+        {
+            "name": "doc_search",
+            "description": "Search over uploaded documents using semantic similarity. Use when the user uploads a file and asks questions about it.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Question or search query"},
+                    "n_results": {"type": "integer", "description": "Number of chunks to return (default 4)", "default": 4},
+                },
+                "required": ["query"],
+            },
+        },
+        {
             "name": "browser_screenshot",
             "description": "Open a URL in a real Chromium browser and take a screenshot. Use when the user asks to open/browse/show a website, or when you need to visually inspect a page. Returns a screenshot URL.",
             "input_schema": {
@@ -348,6 +395,22 @@ class AIOrchestrator:
                 sandbox = CodeSandbox()
                 result = sandbox.execute(inputs["code"], inputs.get("timeout", 15))
                 return sandbox.format_result(result)
+            if name == "web_search":
+                from tools.search_tools import SearchTools
+                st = SearchTools()
+                if inputs.get("news"):
+                    return st.news_search(inputs["query"], inputs.get("max_results", 6))
+                return st.web_search(inputs["query"], inputs.get("max_results", 8))
+            if name == "git":
+                from tools.git_tools import GitTools
+                gt = GitTools()
+                action = inputs.pop("action", "status")
+                return gt.dispatch(action, **inputs)
+            if name == "doc_search":
+                results = self.memory.search(inputs["query"], inputs.get("n_results", 4))
+                # Filter to doc: sources only
+                doc_results = [r for r in results if str(r.get("key","")).startswith("doc:")]
+                return json.dumps(doc_results if doc_results else results, ensure_ascii=False, indent=2)
             if name == "browser_screenshot":
                 result = self.browser_tools.screenshot(inputs["url"], inputs.get("full_page", True))
                 return json.dumps({"screenshot_url": result["url"], "path": result["path"]})
