@@ -891,6 +891,28 @@ def notify_slack():
     return jsonify(result)
 
 
+@app.route("/api/notify/telegram", methods=["POST"])
+def notify_telegram():
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "text required"}), 400
+    token = config.TELEGRAM_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        return jsonify({"error": "TELEGRAM_TOKEN and TELEGRAM_CHAT_ID not configured"}), 503
+    try:
+        import requests as _req
+        r = _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        )
+        return jsonify(r.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/notify/discord", methods=["POST"])
 def notify_discord():
     data = request.get_json(silent=True) or {}
@@ -1452,6 +1474,76 @@ def smart_stream():
     resp.headers["Cache-Control"] = "no-cache"
     resp.headers["X-Accel-Buffering"] = "no"
     return resp
+
+
+@app.route("/api/documents/upload", methods=["POST"])
+def documents_upload():
+    """Upload and index a document (PDF, TXT, MD) into ChromaDB for RAG."""
+    if "file" not in request.files:
+        return jsonify({"error": "file required"}), 400
+    f = request.files["file"]
+    filename = f.filename or "doc"
+    file_bytes = f.read()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    try:
+        if ext == "pdf":
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                text = "\n".join(p.extract_text() or "" for p in pdf.pages)
+        else:
+            text = file_bytes.decode("utf-8", errors="replace")
+
+        if not text.strip():
+            return jsonify({"error": "Could not extract text from file"}), 400
+
+        from memory.memory_manager import MemoryManager
+        mm = MemoryManager(config.CHROMADB_PATH)
+        # Split into chunks of ~1000 chars with overlap
+        chunks = [text[i:i+1000] for i in range(0, len(text), 800)]
+        for i, chunk in enumerate(chunks[:50]):  # max 50 chunks per doc
+            mm.store(f"doc:{filename}:chunk{i}", chunk, {"source": filename, "chunk": i})
+
+        return jsonify({"ok": True, "filename": filename, "chunks": len(chunks[:50])})
+    except Exception as e:
+        logger.exception("Document upload error")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/files/tree", methods=["GET"])
+def files_tree():
+    """Return a directory tree of the project (max depth 3, no hidden/cache dirs)."""
+    import os
+    root = os.getcwd()
+    skip_dirs = {".git", "__pycache__", "node_modules", ".venv", "venv", "data", ".claude"}
+    skip_ext = {".pyc", ".pyo", ".egg-info"}
+
+    def build_tree(path: str, depth: int = 0) -> list:
+        if depth > 3:
+            return []
+        items = []
+        try:
+            entries = sorted(os.scandir(path), key=lambda e: (not e.is_dir(), e.name))
+        except PermissionError:
+            return []
+        for entry in entries:
+            if entry.name.startswith(".") and entry.name not in (".env.example",):
+                continue
+            if entry.is_dir() and entry.name in skip_dirs:
+                continue
+            if entry.is_file() and any(entry.name.endswith(x) for x in skip_ext):
+                continue
+            item = {
+                "name": entry.name,
+                "path": os.path.relpath(entry.path, root),
+                "type": "dir" if entry.is_dir() else "file",
+            }
+            if entry.is_dir():
+                item["children"] = build_tree(entry.path, depth + 1)
+            items.append(item)
+        return items
+
+    return jsonify({"tree": build_tree(root)})
 
 
 if __name__ == "__main__":

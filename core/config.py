@@ -36,5 +36,10 @@ class Config:
     # ── Memory ─────────────────────────────────────────────────────────────────
     CHROMADB_PATH: str = os.getenv("CHROMADB_PATH", "./data/chromadb")
 
+    # ── Notifications ──────────────────────────────────────────────────────────
+    TELEGRAM_TOKEN: str = os.getenv("TELEGRAM_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    SLACK_WEBHOOK: str = os.getenv("SLACK_WEBHOOK", "")
+
 
 config = Config()
