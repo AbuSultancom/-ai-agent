@@ -7,6 +7,7 @@ import os
 
 import anthropic
 
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,10 @@ Respond in the same language as the question."""
 class VisionEngine:
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        self._is_claude = model_router.is_claude(config.MODEL)
+
+    def _local_model_unsupported(self) -> str:
+        return f"Vision requires a Claude model. Current model '{config.MODEL}' does not support image input. Set MODEL=claude-opus-4-7 (or any claude-*) in .env."
 
     def _encode_image(self, data: bytes, mime_type: str) -> dict:
         return {
@@ -36,6 +41,8 @@ class VisionEngine:
     def analyze(self, image_data: bytes, mime_type: str, question: str = "") -> str:
         if mime_type not in SUPPORTED_TYPES:
             return f"Unsupported image type: {mime_type}. Use JPEG, PNG, GIF, or WebP."
+        if not self._is_claude:
+            return self._local_model_unsupported()
 
         prompt = question or "Describe this image in detail. What do you see?"
 
@@ -68,6 +75,8 @@ class VisionEngine:
         return self.analyze(r.content, mime_type, question)
 
     def compare_images(self, img1: bytes, mime1: str, img2: bytes, mime2: str) -> str:
+        if not self._is_claude:
+            return self._local_model_unsupported()
         response = self.client.messages.create(
             model=config.MODEL,
             max_tokens=2048,
@@ -84,6 +93,8 @@ class VisionEngine:
         return next((b.text for b in response.content if b.type == "text"), "")
 
     def extract_text_ocr(self, image_data: bytes, mime_type: str) -> str:
+        if not self._is_claude:
+            return self._local_model_unsupported()
         response = self.client.messages.create(
             model=config.MODEL,
             max_tokens=4096,

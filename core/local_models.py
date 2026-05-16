@@ -22,6 +22,8 @@ RECOMMENDED_MODELS = [
     "qwen2.5-coder",
     "codellama",
     "deepseek-r1",
+    "deepseek-v4-flash",
+    "deepseek-v4",
     "phi4",
     "gemma2",
 ]
@@ -183,6 +185,116 @@ def generate(
         return resp.json().get("response", "")
     except Exception as exc:
         return f"Ollama error: {exc}"
+
+
+def _anthropic_tools_to_ollama(tools: list[dict]) -> list[dict]:
+    """Convert Anthropic tool definitions to Ollama/OpenAI function-call format."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {}),
+            },
+        }
+        for t in tools
+    ]
+
+
+def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+    system: str = "",
+    max_tokens: int = 4096,
+) -> dict:
+    """
+    Chat with Ollama using tool use.
+
+    Returns normalized dict:
+      text, tool_calls, stop_reason, _history_assistant, _backend
+    """
+    model = model or config.LOCAL_MODEL
+    ollama_tools = _anthropic_tools_to_ollama(tools)
+
+    ollama_messages: list[dict] = []
+    if system:
+        ollama_messages.append({"role": "system", "content": system})
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+
+        if isinstance(content, list):
+            # Tool results or mixed content blocks
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    ollama_messages.append({"role": "tool", "content": block.get("content", "")})
+                elif isinstance(block, dict) and block.get("type") == "text":
+                    ollama_messages.append({"role": role, "content": block.get("text", "")})
+                # Skip thinking blocks
+        elif msg.get("tool_calls"):
+            # Already an Ollama-format assistant message with tool_calls
+            ollama_messages.append(msg)
+        else:
+            ollama_messages.append({"role": role, "content": content})
+
+    payload = {
+        "model": model,
+        "messages": ollama_messages,
+        "tools": ollama_tools,
+        "stream": False,
+        "options": {"num_predict": max_tokens},
+    }
+
+    try:
+        resp = requests.post(f"{_OLLAMA_BASE}/api/chat", json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        message = data.get("message", {})
+        text = message.get("content", "") or ""
+        tool_calls_raw = message.get("tool_calls") or []
+
+        tool_calls = []
+        for i, tc in enumerate(tool_calls_raw):
+            fn = tc.get("function", {})
+            args = fn.get("arguments", {})
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            tool_calls.append({
+                "id": f"call_{i}_{fn.get('name', '')}",
+                "name": fn.get("name", ""),
+                "inputs": args,
+            })
+
+        stop_reason = "tool_use" if tool_calls else "end_turn"
+        history_assistant: dict = {"role": "assistant", "content": text}
+        if tool_calls:
+            history_assistant["tool_calls"] = [
+                {"function": {"name": tc["name"], "arguments": tc["inputs"]}}
+                for tc in tool_calls
+            ]
+
+        return {
+            "text": text,
+            "tool_calls": tool_calls,
+            "stop_reason": stop_reason,
+            "_history_assistant": history_assistant,
+            "_backend": "ollama",
+        }
+    except Exception as exc:
+        logger.exception("Ollama chat_with_tools error")
+        return {
+            "text": f"Ollama error: {exc}",
+            "tool_calls": [],
+            "stop_reason": "end_turn",
+            "_history_assistant": {"role": "assistant", "content": f"Error: {exc}"},
+            "_backend": "ollama",
+        }
 
 
 def model_info(model_name: str) -> dict:

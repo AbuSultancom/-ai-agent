@@ -25,6 +25,8 @@
       <button class="tab-btn" data-tab="agents">🤝 Agents</button>
       <button class="tab-btn" data-tab="voice">🎙️ Voice</button>
       <button class="tab-btn" data-tab="automation">⚙️ Automation</button>
+      <button class="tab-btn" data-tab="healer">🔧 Self-Heal</button>
+      <button class="tab-btn" data-tab="twin">🪞 Twin</button>
     </div>
     <div class="nav-right">
       <select id="global-model-select" title="Active model"></select>
@@ -425,6 +427,71 @@
         <button id="notif-send-btn" class="btn primary">Send Notification</button>
       </div>
       <div id="notif-result" class="output-box" style="min-height:40px"></div>
+    </div>
+  </section>
+
+  <!-- SELF-HEALING TAB -->
+  <section id="tab-healer" class="tab-content">
+    <div class="panel">
+      <h2>🔧 Analyze &amp; Fix an Error</h2>
+      <p class="hint">Paste an error traceback — the system will generate and optionally apply a code patch.</p>
+      <textarea id="heal-error" placeholder="Paste error traceback here…" rows="6"></textarea>
+      <input id="heal-task" type="text" placeholder="What task triggered this error? (optional context)" />
+      <input id="heal-file" type="text" placeholder="File hint e.g. core/orchestrator.py (optional)" />
+      <div class="btn-row">
+        <button id="heal-analyze-btn" class="btn primary">🔍 Analyze</button>
+        <button id="heal-auto-btn" class="btn secondary">⚡ Analyze + Auto-Apply</button>
+      </div>
+      <div id="heal-result" class="output-box" style="min-height:120px"></div>
+    </div>
+    <div class="panel">
+      <h2>📜 Heal Log</h2>
+      <button id="refresh-heal-log-btn" class="btn secondary small">↻ Refresh</button>
+      <button id="refresh-backups-btn" class="btn secondary small">📦 Backups</button>
+      <div id="heal-log" class="tasks-list" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <!-- DIGITAL TWIN TAB -->
+  <section id="tab-twin" class="tab-content">
+    <div class="panel">
+      <h2>🪞 Your Digital Twin</h2>
+      <div class="input-row">
+        <input id="twin-name" type="text" placeholder="Your name (personalizes the twin)" style="margin-bottom:0" />
+        <button id="twin-name-btn" class="btn secondary">Set Name</button>
+      </div>
+      <button id="twin-profile-btn" class="btn primary" style="margin-top:10px">Load Profile &amp; Summary</button>
+      <div id="twin-summary" class="output-box" style="min-height:80px;margin-top:10px"></div>
+    </div>
+    <div class="panel">
+      <h2>📥 Train Your Twin</h2>
+      <p class="hint">Upload code files, notes, or documents — the twin learns your thinking style.</p>
+      <div class="upload-area" id="twin-upload-area">
+        <span>Drop files here or <label for="twin-file-input" class="link">browse</label></span>
+        <input id="twin-file-input" type="file" accept=".py,.md,.txt,.js,.ts,.java,.cpp,.rs" multiple style="display:none" />
+      </div>
+      <input id="twin-dir" type="text" placeholder="Or ingest a full directory path e.g. ~/projects/myapp" />
+      <div class="btn-row">
+        <button id="twin-ingest-file-btn" class="btn primary">Ingest Files</button>
+        <button id="twin-ingest-dir-btn" class="btn secondary">Ingest Directory</button>
+      </div>
+      <div id="twin-ingest-result" class="output-box" style="min-height:40px"></div>
+    </div>
+    <div class="panel">
+      <h2>💬 Ask Your Twin</h2>
+      <p class="hint">The twin answers based on YOUR thinking style, not generic AI.</p>
+      <textarea id="twin-question" placeholder="Ask your twin anything… e.g. How would I design a caching layer for this project?" rows="3"></textarea>
+      <button id="twin-ask-btn" class="btn primary">Ask Twin</button>
+      <div id="twin-answer" class="output-box" style="min-height:100px"></div>
+    </div>
+    <div class="panel">
+      <h2>🧠 Probing Session</h2>
+      <p class="hint">The twin asks you questions to better understand your thinking patterns.</p>
+      <button id="twin-probe-btn" class="btn secondary">Generate Question</button>
+      <div id="twin-probe-question" class="output-box" style="min-height:50px;margin:10px 0"></div>
+      <textarea id="twin-probe-answer" placeholder="Your answer…" rows="3"></textarea>
+      <button id="twin-probe-submit-btn" class="btn primary">Submit Answer</button>
+      <div id="twin-probe-result" class="output-box" style="min-height:40px"></div>
     </div>
   </section>
 

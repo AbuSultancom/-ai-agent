@@ -6,8 +6,7 @@ import logging
 import os
 import uuid
 
-import anthropic
-
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ def _ensure_charts_dir() -> str:
 
 class DataAnalyst:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        pass
 
     # ── Loaders ───────────────────────────────────────────────────────────────
 
@@ -103,17 +102,12 @@ class DataAnalyst:
         prompt_q = question or "Provide a comprehensive analysis of this dataset."
         context = dataset.summary() + "\n\n**CSV sample:**\n" + dataset.to_csv_text(50)
 
-        response = self.client.messages.create(
-            model=config.MODEL,
+        result = model_router.chat(
+            [{"role": "user", "content": f"Dataset info:\n{context}\n\nQuestion: {prompt_q}"}],
+            system="You are an expert data analyst. Analyze the provided dataset and answer the question clearly. Use markdown formatting.",
             max_tokens=4096,
-            thinking={"type": "adaptive"},
-            system=[{"type": "text",
-                     "text": "You are an expert data analyst. Analyze the provided dataset and answer the question clearly. Use markdown formatting.",
-                     "cache_control": {"type": "ephemeral"}}],
-            messages=[{"role": "user",
-                       "content": f"Dataset info:\n{context}\n\nQuestion: {prompt_q}"}],
         )
-        return next((b.text for b in response.content if b.type == "text"), "")
+        return result if isinstance(result, str) else "".join(result)
 
     # ── Chart Generation ──────────────────────────────────────────────────────
 

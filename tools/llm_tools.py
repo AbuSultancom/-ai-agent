@@ -1,71 +1,44 @@
+"""LLM Tools — wrappers around model_router for common LLM operations."""
+
 import logging
 from collections.abc import Generator
 
-import anthropic
-
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
 
 
 class LLMTools:
-    """Wrappers around the Anthropic Claude API for common LLM operations."""
-
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        self.model = config.MODEL
-
     def generate(self, prompt: str, system: str = "", max_tokens: int = 4096) -> str:
-        messages = [{"role": "user", "content": prompt}]
-        kwargs: dict = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "messages": messages,
-            "thinking": {"type": "adaptive"},
-        }
-        if system:
-            kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
+        result = model_router.chat(
+            [{"role": "user", "content": prompt}],
+            system=system,
+            max_tokens=max_tokens,
+        )
+        return result if isinstance(result, str) else "".join(result)
 
-        response = self.client.messages.create(**kwargs)
-        return next((b.text for b in response.content if b.type == "text"), "")
-
-    def stream(
-        self, prompt: str, system: str = "", max_tokens: int = 16000
-    ) -> Generator[str, None, None]:
-        messages = [{"role": "user", "content": prompt}]
-        kwargs: dict = {
-            "model": self.model,
-            "max_tokens": max_tokens,
-            "messages": messages,
-            "thinking": {"type": "adaptive"},
-        }
-        if system:
-            kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-
-        with self.client.messages.stream(**kwargs) as stream:
-            for text in stream.text_stream:
-                yield text
+    def stream(self, prompt: str, system: str = "", max_tokens: int = 16000) -> Generator[str, None, None]:
+        return model_router.chat(
+            [{"role": "user", "content": prompt}],
+            system=system,
+            max_tokens=max_tokens,
+            stream=True,
+        )
 
     def classify(self, text: str, categories: list[str]) -> str:
         cats = ", ".join(categories)
-        prompt = f"Classify the following text into exactly one of these categories: {cats}\n\nText: {text}\n\nRespond with only the category name."
+        prompt = (
+            f"Classify the following text into exactly one of these categories: {cats}\n\n"
+            f"Text: {text}\n\nRespond with only the category name."
+        )
         return self.generate(prompt, max_tokens=64).strip()
 
     def summarize(self, text: str, max_words: int = 150) -> str:
-        prompt = f"Summarize the following text in at most {max_words} words:\n\n{text}"
-        return self.generate(prompt, max_tokens=512)
+        return self.generate(
+            f"Summarize the following text in at most {max_words} words:\n\n{text}",
+            max_tokens=512,
+        )
 
     def extract_json(self, prompt: str, schema_hint: str = "") -> str:
         full_prompt = prompt
@@ -76,19 +49,5 @@ class LLMTools:
         return self.generate(full_prompt, max_tokens=2048)
 
     def chat(self, messages: list[dict], system: str = "") -> str:
-        kwargs: dict = {
-            "model": self.model,
-            "max_tokens": config.MAX_TOKENS,
-            "messages": messages,
-            "thinking": {"type": "adaptive"},
-        }
-        if system:
-            kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
-        response = self.client.messages.create(**kwargs)
-        return next((b.text for b in response.content if b.type == "text"), "")
+        result = model_router.chat(messages, system=system, max_tokens=config.MAX_TOKENS)
+        return result if isinstance(result, str) else "".join(result)

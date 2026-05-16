@@ -1,9 +1,7 @@
 import json
 import logging
 
-import anthropic
-
-from core.config import config
+from core import model_router
 
 logger = logging.getLogger(__name__)
 
@@ -14,22 +12,15 @@ Keep steps focused and achievable — typically 3-8 steps for most tasks."""
 
 
 class PlannerAgent:
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
     def decompose(self, task: str) -> list[dict]:
-        """Use Claude to decompose a task into executable steps."""
-        response = self.client.messages.create(
-            model=config.MODEL,
-            max_tokens=4096,
-            thinking={"type": "adaptive"},
+        """Decompose a task into executable steps."""
+        text = model_router.chat(
+            [{"role": "user", "content": f"Task to decompose:\n\n{task}"}],
             system=_PLANNER_SYSTEM,
-            messages=[{"role": "user", "content": f"Task to decompose:\n\n{task}"}],
+            max_tokens=4096,
         )
-
-        text = next(
-            (b.text for b in response.content if b.type == "text"), "[]"
-        )
+        if not isinstance(text, str):
+            text = "".join(text)
 
         # Strip markdown code fences if present
         text = text.strip()

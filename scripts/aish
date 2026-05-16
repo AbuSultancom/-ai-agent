@@ -1,0 +1,383 @@
+#!/usr/bin/env python3
+"""
+aish — AI Shell
+An intelligent terminal that understands natural language and translates it
+to shell commands, manages system context, and learns your preferences.
+
+Usage:
+  aish                    Start interactive AI shell
+  aish "list big files"   One-shot command
+  aish -c "task"          Run as agent task (not just shell command)
+
+Install:
+  sudo cp scripts/aish /usr/local/bin/aish
+  sudo chmod +x /usr/local/bin/aish
+  # Add to /etc/shells: /usr/local/bin/aish
+  # Set as default: chsh -s /usr/local/bin/aish
+"""
+
+import json
+import os
+import readline
+import signal
+import subprocess
+import sys
+import textwrap
+import time
+from pathlib import Path
+from typing import Optional
+
+# ── Config ────────────────────────────────────────────────────────────────────
+AGENT_BASE_URL = os.environ.get("AI_AGENT_URL", "http://localhost:5000")
+HISTORY_FILE = os.path.expanduser("~/.aish_history")
+MAX_HISTORY = 500
+
+# Colors
+C = {
+    "reset": "\033[0m",
+    "bold": "\033[1m",
+    "dim": "\033[2m",
+    "cyan": "\033[96m",
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+    "red": "\033[91m",
+    "blue": "\033[94m",
+    "magenta": "\033[95m",
+    "white": "\033[97m",
+}
+
+BANNER = f"""{C['cyan']}{C['bold']}
+  █████╗ ██╗███████╗██╗  ██╗
+ ██╔══██╗██║██╔════╝██║  ██║
+ ███████║██║███████╗███████║
+ ██╔══██║██║╚════██║██╔══██║
+ ██║  ██║██║███████║██║  ██║
+ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝  ╚═╝
+{C['reset']}{C['dim']}  AI-Powered Shell — type naturally or use shell commands
+  Type 'help' for commands, Ctrl+C or 'exit' to quit
+{C['reset']}"""
+
+
+def color(text: str, *keys: str) -> str:
+    prefix = "".join(C.get(k, "") for k in keys)
+    return f"{prefix}{text}{C['reset']}"
+
+
+# ── Context tracking ──────────────────────────────────────────────────────────
+
+class ShellContext:
+    def __init__(self):
+        self.cwd = Path.cwd()
+        self.history: list[dict] = []  # {"input", "command", "output", "ts"}
+        self.env = dict(os.environ)
+        self.aliases: dict[str, str] = {}
+        self.last_exit_code = 0
+
+    def add(self, entry: dict):
+        self.history.append(entry)
+        if len(self.history) > 100:
+            self.history.pop(0)
+
+    def recent_context(self, n: int = 5) -> str:
+        lines = []
+        for h in self.history[-n:]:
+            lines.append(f"$ {h.get('command', h.get('input', ''))}")
+            out = h.get("output", "").strip()
+            if out:
+                lines.append(out[:300])
+        return "\n".join(lines)
+
+
+# ── AI translation ────────────────────────────────────────────────────────────
+
+_TRANSLATE_SYSTEM = """You are an AI shell assistant that translates natural language into shell commands.
+
+Rules:
+1. Return ONLY a JSON object — no extra text, no markdown
+2. Format: {"command": "...", "explanation": "...", "safe": true|false, "confirm": false}
+3. Set safe=false for destructive commands (rm -rf, format, kill -9, etc.)
+4. Set confirm=true for commands that modify system state (install, delete, overwrite)
+5. Use the provided context (cwd, recent history) to build correct paths
+6. Prefer safe alternatives: 'ls -la' over 'ls', 'rm -i' for deletions, etc.
+7. If the input is already a valid shell command, return it unchanged with explanation
+
+If the input cannot be translated to a safe command, return:
+{"command": "", "explanation": "Cannot safely translate: ...", "safe": false, "confirm": false}"""
+
+
+def translate_to_command(user_input: str, context: ShellContext) -> dict:
+    """Use Claude (via the agent API) to translate natural language to shell command."""
+    ctx_summary = (
+        f"Current directory: {context.cwd}\n"
+        f"Recent commands:\n{context.recent_context(3)}\n"
+        f"Last exit code: {context.last_exit_code}"
+    )
+    prompt = f"Context:\n{ctx_summary}\n\nUser input: {user_input}"
+
+    try:
+        import urllib.request, urllib.error
+        data = json.dumps({"message": prompt, "system": _TRANSLATE_SYSTEM}).encode()
+        req = urllib.request.Request(
+            f"{AGENT_BASE_URL}/api/chat",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+            reply = body.get("reply", "")
+            start, end = reply.find("{"), reply.rfind("}") + 1
+            if start >= 0:
+                return json.loads(reply[start:end])
+    except Exception:
+        pass
+
+    # Fallback: try local anthropic if agent is not running
+    try:
+        import anthropic
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not api_key:
+            raise RuntimeError("No API key")
+        client = anthropic.Anthropic(api_key=api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_TRANSLATE_SYSTEM,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        start, end = text.find("{"), text.rfind("}") + 1
+        if start >= 0:
+            return json.loads(text[start:end])
+    except Exception as e:
+        pass
+
+    # Last resort: return input as-is
+    return {"command": user_input, "explanation": "(direct)", "safe": True, "confirm": False}
+
+
+# ── Command execution ──────────────────────────────────────────────────────────
+
+def execute(command: str, context: ShellContext) -> tuple[int, str]:
+    """Execute a shell command and capture output."""
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=str(context.cwd),
+            env=context.env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output = result.stdout + (f"\n{color(result.stderr, 'red')}" if result.stderr else "")
+        context.last_exit_code = result.returncode
+        return result.returncode, output
+    except subprocess.TimeoutExpired:
+        context.last_exit_code = 124
+        return 124, color("Command timed out (60s)", "red")
+    except Exception as e:
+        context.last_exit_code = 1
+        return 1, color(str(e), "red")
+
+
+def run_agent_task(task: str) -> str:
+    """Run a task through the full AI agent (not just a shell command)."""
+    try:
+        import urllib.request
+        data = json.dumps({"task": task}).encode()
+        req = urllib.request.Request(
+            f"{AGENT_BASE_URL}/api/task/run",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read())
+            return body.get("output", body.get("error", "No output"))
+    except Exception as e:
+        return f"Agent unavailable: {e}"
+
+
+# ── Built-in commands ─────────────────────────────────────────────────────────
+
+def handle_builtin(cmd: str, context: ShellContext) -> Optional[str]:
+    """Handle shell built-ins that can't run in a subprocess."""
+    parts = cmd.strip().split(None, 1)
+    if not parts:
+        return None
+    name = parts[0]
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if name in ("exit", "quit", "bye"):
+        print(color("\nGoodbye! 👋", "cyan"))
+        sys.exit(0)
+
+    if name == "cd":
+        target = Path(arg).expanduser() if arg else Path.home()
+        try:
+            context.cwd = target.resolve()
+            os.chdir(context.cwd)
+            return ""
+        except Exception as e:
+            return color(str(e), "red")
+
+    if name == "help":
+        return f"""{color('aish commands:', 'bold', 'cyan')}
+  Any natural language   → translated to shell command
+  !<command>             → run shell command directly (skip AI)
+  !!<task>               → run as full AI agent task
+  cd <dir>               → change directory
+  history                → show command history
+  context                → show current shell context
+  alias <name>=<cmd>     → set an alias
+  exit / quit            → exit aish
+"""
+
+    if name == "history":
+        lines = [f"{i+1:3}  {h.get('input', h.get('command',''))}"
+                 for i, h in enumerate(context.history)]
+        return "\n".join(lines) or "(empty)"
+
+    if name == "context":
+        return (
+            f"Directory : {context.cwd}\n"
+            f"Last code : {context.last_exit_code}\n"
+            f"History   : {len(context.history)} commands"
+        )
+
+    if name == "alias" and "=" in arg:
+        k, v = arg.split("=", 1)
+        context.aliases[k.strip()] = v.strip()
+        return f"Alias set: {k.strip()} → {v.strip()}"
+
+    return None  # Not a built-in
+
+
+# ── Prompt ────────────────────────────────────────────────────────────────────
+
+def make_prompt(context: ShellContext) -> str:
+    cwd = str(context.cwd).replace(str(Path.home()), "~")
+    code_color = "green" if context.last_exit_code == 0 else "red"
+    code_sym = "✓" if context.last_exit_code == 0 else f"✗{context.last_exit_code}"
+    return (
+        f"{color('aish', 'cyan', 'bold')} "
+        f"{color(cwd, 'blue')} "
+        f"{color(code_sym, code_color)} "
+        f"{color('❯', 'magenta', 'bold')} "
+    )
+
+
+# ── Main loop ─────────────────────────────────────────────────────────────────
+
+def main():
+    context = ShellContext()
+
+    # Readline history
+    try:
+        readline.read_history_file(HISTORY_FILE)
+    except FileNotFoundError:
+        pass
+    readline.set_history_length(MAX_HISTORY)
+
+    # Handle Ctrl+C gracefully
+    def handle_sigint(sig, frame):
+        print()
+
+    signal.signal(signal.SIGINT, handle_sigint)
+
+    # One-shot mode
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "-c" and len(sys.argv) > 2:
+            print(run_agent_task(" ".join(sys.argv[2:])))
+            return
+        user_input = " ".join(sys.argv[1:])
+        result = translate_to_command(user_input, context)
+        cmd = result.get("command", "")
+        print(color(f"→ {cmd}", "dim"))
+        if cmd:
+            code, output = execute(cmd, context)
+            print(output)
+        return
+
+    print(BANNER)
+
+    while True:
+        try:
+            user_input = input(make_prompt(context)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            continue
+
+        if not user_input:
+            continue
+
+        readline.add_history(user_input)
+
+        # Expand aliases
+        first_word = user_input.split()[0]
+        if first_word in context.aliases:
+            user_input = context.aliases[first_word] + user_input[len(first_word):]
+
+        # Built-in commands
+        builtin_result = handle_builtin(user_input, context)
+        if builtin_result is not None:
+            if builtin_result:
+                print(builtin_result)
+            context.add({"input": user_input, "command": user_input, "output": builtin_result, "ts": time.time()})
+            continue
+
+        # !! prefix → full agent task
+        if user_input.startswith("!!"):
+            task = user_input[2:].strip()
+            print(color(f"[Agent task] {task}", "dim"))
+            output = run_agent_task(task)
+            print(output)
+            context.add({"input": user_input, "command": f"agent: {task}", "output": output, "ts": time.time()})
+            continue
+
+        # ! prefix → direct shell command (skip AI)
+        if user_input.startswith("!"):
+            cmd = user_input[1:].strip()
+        else:
+            # AI translation
+            print(color("  thinking…", "dim"), end="\r")
+            result = translate_to_command(user_input, context)
+            cmd = result.get("command", "").strip()
+            explanation = result.get("explanation", "")
+            safe = result.get("safe", True)
+            confirm = result.get("confirm", False)
+
+            if not cmd:
+                print(color(f"  {explanation}", "yellow"))
+                continue
+
+            # Show translated command
+            safety_icon = color("⚠", "yellow") if not safe else color("✓", "green")
+            print(f"  {safety_icon} {color(cmd, 'white', 'bold')}  {color(explanation, 'dim')}")
+
+            # Confirm if needed
+            if not safe or confirm:
+                try:
+                    ans = input(color("  Execute? [y/N] ", "yellow")).strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    continue
+                if ans != "y":
+                    print(color("  Cancelled.", "dim"))
+                    continue
+
+        # Execute
+        code, output = execute(cmd, context)
+        if output.strip():
+            print(output)
+
+        context.add({"input": user_input, "command": cmd, "output": output.strip()[:500], "ts": time.time()})
+
+    try:
+        readline.write_history_file(HISTORY_FILE)
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    main()

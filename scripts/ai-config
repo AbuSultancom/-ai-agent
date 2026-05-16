@@ -1,0 +1,682 @@
+#!/usr/bin/env python3
+"""
+ai-config — Interactive configuration manager for AI Agent
+
+Usage:
+  ai-config              Interactive menu (all settings)
+  ai-config --first-run  First-run wizard (only critical settings)
+  ai-config get KEY      Print current value of KEY
+  ai-config set KEY VAL  Set KEY=VAL in .env
+
+Install (already done by install.sh):
+  sudo cp scripts/ai-config /usr/local/bin/ai-config
+  sudo chmod +x /usr/local/bin/ai-config
+"""
+
+import os
+import re
+import sys
+import subprocess
+import textwrap
+from pathlib import Path
+from typing import Optional
+
+# ── Locate .env ───────────────────────────────────────────────────────────────
+def find_env_file() -> Path:
+    # Check AI_AGENT_DIR env var first
+    if d := os.environ.get("AI_AGENT_DIR"):
+        p = Path(d) / ".env"
+        if p.exists():
+            return p
+
+    # Walk up from script location
+    script_dir = Path(__file__).resolve().parent
+    for candidate in [script_dir.parent, Path.home() / ".ai-agent", Path("/opt/ai-agent")]:
+        p = candidate / ".env"
+        if p.exists():
+            return p
+
+    # Last resort: current directory
+    p = Path.cwd() / ".env"
+    if p.exists():
+        return p
+
+    # No .env found — return the most likely location so caller can create it
+    return script_dir.parent / ".env"
+
+
+ENV_FILE = find_env_file()
+EXAMPLE_FILE = ENV_FILE.parent / ".env.example"
+
+# ── Colors ────────────────────────────────────────────────────────────────────
+C = {
+    "r": "\033[91m", "g": "\033[92m", "y": "\033[93m", "b": "\033[94m",
+    "c": "\033[96m", "w": "\033[97m", "d": "\033[2m", "bold": "\033[1m",
+    "reset": "\033[0m",
+}
+
+def c(text, *keys):
+    return "".join(C.get(k, "") for k in keys) + text + C["reset"]
+
+
+# ── .env read/write ───────────────────────────────────────────────────────────
+def read_env() -> dict[str, str]:
+    env: dict[str, str] = {}
+    if not ENV_FILE.exists():
+        return env
+    for line in ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, _, v = line.partition("=")
+            # Strip inline comment
+            v = re.sub(r"\s+#.*$", "", v).strip()
+            env[k.strip()] = v
+    return env
+
+
+def write_env_key(key: str, value: str):
+    """Update or append a key in .env."""
+    if not ENV_FILE.exists():
+        if EXAMPLE_FILE.exists():
+            ENV_FILE.write_text(EXAMPLE_FILE.read_text())
+        else:
+            ENV_FILE.write_text("")
+
+    text = ENV_FILE.read_text()
+    pattern = re.compile(rf"^{re.escape(key)}\s*=.*$", re.MULTILINE)
+
+    if pattern.search(text):
+        text = pattern.sub(f"{key}={value}", text)
+    else:
+        text = text.rstrip("\n") + f"\n{key}={value}\n"
+
+    ENV_FILE.write_text(text)
+
+
+# ── Settings schema ───────────────────────────────────────────────────────────
+SECTIONS = [
+    {
+        "title": "Core Settings",
+        "emoji": "⚙️",
+        "settings": [
+            {
+                "key": "ANTHROPIC_API_KEY",
+                "label": "Anthropic API Key",
+                "hint": "sk-ant-... (get from console.anthropic.com)",
+                "required": True,
+                "secret": True,
+                "validate": "_validate_api_key",
+            },
+            {
+                "key": "MODEL",
+                "label": "Claude Model",
+                "hint": "claude-opus-4-7 / claude-sonnet-4-6 / claude-haiku-4-5-20251001",
+                "default": "claude-opus-4-7",
+                "choices": ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+            },
+            {
+                "key": "PORT",
+                "label": "Server Port",
+                "hint": "Port to run the web dashboard on",
+                "default": "5000",
+            },
+            {
+                "key": "HOST",
+                "label": "Server Host",
+                "hint": "0.0.0.0 = all interfaces, 127.0.0.1 = local only",
+                "default": "0.0.0.0",
+            },
+            {
+                "key": "SECRET_KEY",
+                "label": "Flask Secret Key",
+                "hint": "Random string for session signing (auto-generated if blank)",
+                "secret": True,
+                "auto_generate": True,
+            },
+            {
+                "key": "DEBUG",
+                "label": "Debug Mode",
+                "hint": "true / false",
+                "default": "false",
+                "choices": ["true", "false"],
+            },
+        ],
+    },
+    {
+        "title": "Agent Settings",
+        "emoji": "🤖",
+        "settings": [
+            {
+                "key": "MAX_TOKENS",
+                "label": "Max Response Tokens",
+                "hint": "Maximum tokens per Claude response",
+                "default": "16000",
+            },
+            {
+                "key": "MAX_AGENT_ITERATIONS",
+                "label": "Max Agent Iterations",
+                "hint": "How many tool-use loops the agent can run",
+                "default": "30",
+            },
+            {
+                "key": "BASH_TIMEOUT",
+                "label": "Bash Command Timeout (seconds)",
+                "hint": "Max seconds for shell commands",
+                "default": "30",
+            },
+            {
+                "key": "WEB_TIMEOUT",
+                "label": "Web Request Timeout (seconds)",
+                "hint": "Max seconds for HTTP requests",
+                "default": "15",
+            },
+        ],
+    },
+    {
+        "title": "Authentication",
+        "emoji": "🔐",
+        "settings": [
+            {
+                "key": "AUTH_DISABLED",
+                "label": "Disable Auth (open access)",
+                "hint": "true = no login required, false = JWT required",
+                "default": "true",
+                "choices": ["true", "false"],
+            },
+            {
+                "key": "ADMIN_USER",
+                "label": "Admin Username",
+                "hint": "Used when AUTH_DISABLED=false",
+                "default": "admin",
+            },
+            {
+                "key": "ADMIN_PASS",
+                "label": "Admin Password",
+                "hint": "Used when AUTH_DISABLED=false",
+                "secret": True,
+                "default": "admin123",
+            },
+        ],
+    },
+    {
+        "title": "Local Models (Ollama)",
+        "emoji": "🦙",
+        "settings": [
+            {
+                "key": "OLLAMA_URL",
+                "label": "Ollama Server URL",
+                "hint": "http://localhost:11434 (leave blank to disable)",
+                "default": "http://localhost:11434",
+            },
+            {
+                "key": "LOCAL_MODEL",
+                "label": "Default Local Model",
+                "hint": "e.g. llama3.2, mistral, phi3",
+                "default": "llama3.2",
+            },
+        ],
+    },
+    {
+        "title": "GitHub Integration",
+        "emoji": "🐙",
+        "settings": [
+            {
+                "key": "GITHUB_TOKEN",
+                "label": "GitHub Personal Access Token",
+                "hint": "ghp_... (needs repo scope)",
+                "secret": True,
+            },
+        ],
+    },
+    {
+        "title": "Email Notifications (SMTP)",
+        "emoji": "📧",
+        "settings": [
+            {
+                "key": "SMTP_HOST",
+                "label": "SMTP Host",
+                "hint": "e.g. smtp.gmail.com",
+                "default": "smtp.gmail.com",
+            },
+            {
+                "key": "SMTP_PORT",
+                "label": "SMTP Port",
+                "hint": "587 (TLS) or 465 (SSL)",
+                "default": "587",
+            },
+            {
+                "key": "SMTP_USER",
+                "label": "SMTP Username / Email",
+                "hint": "your@email.com",
+            },
+            {
+                "key": "SMTP_PASS",
+                "label": "SMTP Password / App Password",
+                "hint": "Gmail: use an App Password",
+                "secret": True,
+            },
+            {
+                "key": "NOTIFY_EMAIL",
+                "label": "Notify Email (task completion)",
+                "hint": "Leave blank to disable email notifications",
+            },
+        ],
+    },
+    {
+        "title": "Slack Integration",
+        "emoji": "💬",
+        "settings": [
+            {
+                "key": "SLACK_WEBHOOK_URL",
+                "label": "Slack Webhook URL",
+                "hint": "https://hooks.slack.com/services/...",
+                "secret": True,
+            },
+            {
+                "key": "SLACK_BOT_TOKEN",
+                "label": "Slack Bot Token",
+                "hint": "xoxb-...",
+                "secret": True,
+            },
+        ],
+    },
+    {
+        "title": "Discord Integration",
+        "emoji": "🎮",
+        "settings": [
+            {
+                "key": "DISCORD_WEBHOOK_URL",
+                "label": "Discord Webhook URL",
+                "hint": "https://discord.com/api/webhooks/...",
+                "secret": True,
+            },
+        ],
+    },
+    {
+        "title": "Database",
+        "emoji": "🗄️",
+        "settings": [
+            {
+                "key": "CHROMADB_PATH",
+                "label": "ChromaDB Storage Path",
+                "hint": "Where to persist the vector database",
+                "default": "./data/chromadb",
+            },
+            {
+                "key": "DATABASE_URL",
+                "label": "SQL Database URL",
+                "hint": "postgresql://user:pass@host/db (blank = SQLite)",
+            },
+        ],
+    },
+]
+
+# ── Validation ────────────────────────────────────────────────────────────────
+def _validate_api_key(value: str) -> tuple[bool, str]:
+    """Test the Anthropic API key with a minimal request."""
+    if not value.startswith("sk-ant-"):
+        return False, "API key should start with sk-ant-"
+
+    print(c("  Testing API key…", "d"), end=" ", flush=True)
+    try:
+        import urllib.request, urllib.error
+        import json as _json
+        data = _json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 10,
+            "messages": [{"role": "user", "content": "Hi"}],
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=data,
+            headers={
+                "x-api-key": value,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            _json.loads(resp.read())
+        print(c("✓ valid", "g"))
+        return True, ""
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="ignore")
+        if "invalid_api_key" in body or e.code == 401:
+            print(c("✗ invalid key", "r"))
+            return False, "API key rejected by Anthropic (401)"
+        # Other HTTP errors (rate limit etc.) — still valid key
+        print(c("✓ key accepted (non-auth error)", "y"))
+        return True, ""
+    except Exception as e:
+        print(c(f"⚠ could not verify ({e})", "y"))
+        return True, ""  # Don't block install on connectivity issues
+
+
+def validate_setting(s: dict, value: str) -> tuple[bool, str]:
+    if fn_name := s.get("validate"):
+        fn = globals().get(fn_name)
+        if fn:
+            return fn(value)
+    if choices := s.get("choices"):
+        if value not in choices:
+            return False, f"Must be one of: {', '.join(choices)}"
+    return True, ""
+
+
+# ── Display helpers ───────────────────────────────────────────────────────────
+def mask(value: str) -> str:
+    if not value:
+        return c("(not set)", "d")
+    if len(value) <= 8:
+        return "*" * len(value)
+    return value[:4] + "*" * (len(value) - 8) + value[-4:]
+
+
+def current_display(s: dict, env: dict) -> str:
+    v = env.get(s["key"], "")
+    if not v:
+        default = s.get("default", "")
+        if default:
+            return c(f"(default: {default})", "d")
+        return c("(not set)", "d")
+    if s.get("secret"):
+        return c(mask(v), "y")
+    return c(v, "w")
+
+
+def clear():
+    os.system("clear" if os.name != "nt" else "cls")
+
+
+def header():
+    print(c("╔══════════════════════════════════════╗", "c", "bold"))
+    print(c("║       AI Agent Configuration         ║", "c", "bold"))
+    print(c("╚══════════════════════════════════════╝", "c", "bold"))
+    print(c(f"  Config file: {ENV_FILE}", "d"))
+    print()
+
+
+# ── Input helpers ─────────────────────────────────────────────────────────────
+def prompt_value(s: dict, current: str) -> Optional[str]:
+    """Prompt user for a setting value. Returns new value or None to skip."""
+    label = s["label"]
+    hint = s.get("hint", "")
+    default = s.get("default", current)
+    choices = s.get("choices")
+
+    print(c(f"\n  {label}", "bold", "w"))
+    if hint:
+        print(c(f"  {hint}", "d"))
+    if choices:
+        print(c(f"  Options: {' / '.join(choices)}", "d"))
+
+    display_default = mask(default) if s.get("secret") else (default or "")
+    prompt_str = f"  Value [{display_default}]: " if display_default else "  Value: "
+
+    try:
+        if s.get("secret"):
+            import getpass
+            raw = getpass.getpass(prompt_str)
+        else:
+            raw = input(prompt_str)
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None
+
+    raw = raw.strip()
+
+    # Empty → keep current or use default
+    if not raw:
+        if current:
+            return current
+        if default:
+            return default
+        return ""
+
+    # Validate
+    ok_val, err = validate_setting(s, raw)
+    if not ok_val:
+        print(c(f"  ✗ {err}", "r"))
+        retry = input(c("  Try again? [Y/n]: ", "y")).strip().lower()
+        if retry != "n":
+            return prompt_value(s, current)
+        return None
+
+    return raw
+
+
+# ── Auto-generate secret key ──────────────────────────────────────────────────
+def auto_secret_key() -> str:
+    import secrets
+    return secrets.token_hex(32)
+
+
+# ── First-run wizard ──────────────────────────────────────────────────────────
+def first_run_wizard():
+    clear()
+    header()
+    print(c("  Welcome! Let's configure AI Agent.", "bold", "g"))
+    print(c("  (Press Enter to keep the default value shown in brackets)", "d"))
+    print()
+
+    env = read_env()
+
+    # Critical settings only
+    critical = [
+        ("ANTHROPIC_API_KEY", "⚙️  Core Settings"),
+        ("MODEL", None),
+        ("PORT", None),
+        ("AUTH_DISABLED", "🔐 Authentication"),
+    ]
+
+    changed = False
+    for key, section_header in critical:
+        s = next((s for sec in SECTIONS for s in sec["settings"] if s["key"] == key), None)
+        if not s:
+            continue
+        if section_header:
+            print(c(f"\n{section_header}", "c", "bold"))
+        current = env.get(key, "")
+        new_val = prompt_value(s, current)
+        if new_val is not None and new_val != current:
+            write_env_key(key, new_val)
+            env[key] = new_val
+            changed = True
+
+    # Auto-generate secret key if default
+    sk = env.get("SECRET_KEY", "")
+    if not sk or sk == "change-me-in-production":
+        new_sk = auto_secret_key()
+        write_env_key("SECRET_KEY", new_sk)
+        print(c("\n  ✓ Generated secure SECRET_KEY", "g"))
+        changed = True
+
+    print()
+    if changed:
+        print(c("  ✅ Configuration saved!", "g", "bold"))
+    else:
+        print(c("  No changes made.", "d"))
+
+    print()
+    more = input(c("  Configure more settings now? [y/N]: ", "c")).strip().lower()
+    if more == "y":
+        interactive_menu()
+
+
+# ── Interactive full menu ─────────────────────────────────────────────────────
+def interactive_menu():
+    while True:
+        clear()
+        header()
+        env = read_env()
+
+        print(c("  Sections:", "bold"))
+        for i, section in enumerate(SECTIONS, 1):
+            # Count configured settings in this section
+            total = len(section["settings"])
+            configured = sum(1 for s in section["settings"] if env.get(s["key"]))
+            status = c(f"{configured}/{total}", "g" if configured == total else "y")
+            print(f"  {c(str(i), 'c', 'bold')}.  {section['emoji']}  {section['title']}  {c('[', 'd')}{status}{c(']', 'd')}")
+
+        print(f"\n  {c('s', 'c', 'bold')}.  💾 Save & exit")
+        print(f"  {c('r', 'c', 'bold')}.  🔄 Restart service")
+        print(f"  {c('t', 'c', 'bold')}.  🔑 Test API key")
+        print(f"  {c('q', 'c', 'bold')}.  Exit")
+        print()
+
+        try:
+            choice = input(c("  Select section: ", "c")).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if choice in ("q", "exit", "quit"):
+            break
+        elif choice in ("s", "save"):
+            print(c("\n  ✅ Settings saved to " + str(ENV_FILE), "g"))
+            break
+        elif choice == "r":
+            restart_service()
+        elif choice == "t":
+            test_api_key(env)
+        elif choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(SECTIONS):
+                edit_section(SECTIONS[idx], env)
+            else:
+                print(c("  Invalid choice.", "r"))
+                input("  Press Enter to continue…")
+        else:
+            print(c("  Invalid choice.", "r"))
+            input("  Press Enter to continue…")
+
+
+def edit_section(section: dict, env: dict):
+    clear()
+    header()
+    print(c(f"  {section['emoji']}  {section['title']}", "bold", "c"))
+    print()
+
+    for i, s in enumerate(section["settings"], 1):
+        current = env.get(s["key"], "")
+        disp = current_display(s, env)
+        required_mark = c(" *", "r") if s.get("required") else ""
+        print(f"  {c(str(i), 'c', 'bold')}.  {s['label']}{required_mark}")
+        print(f"       {c('Current:', 'd')} {disp}")
+
+    print(f"\n  {c('0', 'c', 'bold')}.  Back")
+    print()
+
+    try:
+        choice = input(c("  Edit setting #: ", "c")).strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+
+    if choice == "0" or not choice:
+        return
+
+    if not choice.isdigit() or not (1 <= int(choice) <= len(section["settings"])):
+        print(c("  Invalid choice.", "r"))
+        input("  Press Enter…")
+        return
+
+    s = section["settings"][int(choice) - 1]
+    current = env.get(s["key"], "")
+    new_val = prompt_value(s, current)
+
+    if new_val is not None:
+        if new_val != current:
+            write_env_key(s["key"], new_val)
+            env[s["key"]] = new_val
+            print(c(f"\n  ✓ {s['key']} saved", "g"))
+        else:
+            print(c("\n  No change.", "d"))
+
+    input("\n  Press Enter to continue…")
+    edit_section(section, env)  # Stay in section for more edits
+
+
+# ── Service restart ───────────────────────────────────────────────────────────
+def restart_service():
+    print()
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "ai-agent"],
+            capture_output=True, text=True
+        )
+        if result.stdout.strip() == "active":
+            print(c("  Restarting ai-agent service…", "b"))
+            subprocess.run(["sudo", "systemctl", "restart", "ai-agent"], check=True)
+            print(c("  ✓ Service restarted", "g"))
+        else:
+            print(c("  Service is not running.", "y"))
+            start = input(c("  Start it now? [y/N]: ", "y")).strip().lower()
+            if start == "y":
+                subprocess.run(["sudo", "systemctl", "start", "ai-agent"], check=True)
+                print(c("  ✓ Service started", "g"))
+    except FileNotFoundError:
+        print(c("  systemd not available on this system.", "y"))
+        print(c("  Start manually: python3 orchestrator.py serve", "d"))
+    except subprocess.CalledProcessError as e:
+        print(c(f"  ✗ {e}", "r"))
+
+    input("\n  Press Enter to continue…")
+
+
+# ── Quick API key test ────────────────────────────────────────────────────────
+def test_api_key(env: dict):
+    key = env.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        print(c("\n  No API key configured.", "r"))
+    else:
+        valid, err = _validate_api_key(key)
+        if not valid:
+            print(c(f"  ✗ {err}", "r"))
+    input("\n  Press Enter to continue…")
+
+
+# ── CLI get/set ───────────────────────────────────────────────────────────────
+def cli_get(key: str):
+    env = read_env()
+    val = env.get(key, "")
+    if val:
+        print(val)
+    else:
+        print(f"# {key} not set", file=sys.stderr)
+        sys.exit(1)
+
+
+def cli_set(key: str, value: str):
+    write_env_key(key, value)
+    print(c(f"✓ {key} saved to {ENV_FILE}", "g"))
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+def main():
+    args = sys.argv[1:]
+
+    if "--first-run" in args:
+        first_run_wizard()
+        return
+
+    if args and args[0] == "get" and len(args) >= 2:
+        cli_get(args[1])
+        return
+
+    if args and args[0] == "set" and len(args) >= 3:
+        cli_set(args[1], args[2])
+        return
+
+    if args and args[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
+
+    # Default: interactive menu
+    interactive_menu()
+
+
+if __name__ == "__main__":
+    main()

@@ -1205,3 +1205,236 @@ document.querySelector('[data-tab="automation"]').addEventListener('click', () =
   loadResources();
   updateMonitorStatus();
 });
+
+/* ═══════════════════════════════════════
+   TAB — SELF-HEALING SYSTEM
+═══════════════════════════════════════ */
+$('heal-analyze-btn').addEventListener('click', () => runHealAnalysis(false));
+$('heal-auto-btn').addEventListener('click', () => runHealAnalysis(true));
+
+async function runHealAnalysis(autoApply) {
+  const error = $('heal-error').value.trim();
+  if (!error) return showToast('Paste an error traceback first', 'err');
+  const task = $('heal-task').value.trim();
+  const file = $('heal-file').value.trim();
+  const box = $('heal-result');
+  const btn = autoApply ? $('heal-auto-btn') : $('heal-analyze-btn');
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Analyzing… <span class="spinner"></span>';
+  box.textContent = 'Sending error to healer…';
+
+  try {
+    const endpoint = autoApply ? '/api/heal/auto' : '/api/heal/analyze';
+    const r = await APIJ(endpoint, { error, task, file });
+    const data = await r.json();
+
+    if (autoApply) {
+      const patch = data.patch || {};
+      const apply = data.apply_result || {};
+      const healed = data.healed;
+      box.textContent = [
+        `Healed: ${healed ? '✅ YES' : '❌ NO'}`,
+        `Analysis: ${patch.analysis || 'N/A'}`,
+        `Confidence: ${((patch.confidence || 0) * 100).toFixed(0)}%`,
+        `Safe to apply: ${patch.safe_to_apply}`,
+        `File: ${patch.file || 'N/A'}`,
+        apply.applied ? `✅ Patch applied → backup: ${apply.backup}` : `⚠️ Not applied: ${apply.reason || apply.error || 'N/A'}`,
+      ].join('\n');
+      if (healed) showToast('✅ Self-heal applied successfully', 'ok');
+      else showToast('Patch proposed but not applied', 'ok');
+    } else {
+      box.textContent = [
+        `Analysis: ${data.analysis || 'N/A'}`,
+        `Confidence: ${((data.confidence || 0) * 100).toFixed(0)}%`,
+        `Safe to apply: ${data.safe_to_apply}`,
+        `Patch type: ${data.patch_type || 'N/A'}`,
+        `File: ${data.file || 'N/A'}`,
+        `Reasoning: ${data.reasoning || 'N/A'}`,
+        data.old_code ? `\nOLD:\n${data.old_code}` : '',
+        data.new_code ? `\nNEW:\n${data.new_code}` : '',
+      ].filter(Boolean).join('\n');
+
+      if (data.safe_to_apply && data.old_code) {
+        const applyBtn = document.createElement('button');
+        applyBtn.className = 'btn primary';
+        applyBtn.textContent = '✅ Apply This Patch';
+        applyBtn.style.marginTop = '10px';
+        applyBtn.addEventListener('click', async () => {
+          applyBtn.disabled = true;
+          const r2 = await APIJ('/api/heal/apply', { patch: data });
+          const d2 = await r2.json();
+          box.textContent += `\n\nApply result: ${d2.applied ? '✅ Applied' : '❌ ' + (d2.error || d2.reason)}`;
+          if (d2.applied) { loadHealLog(); showToast('✅ Patch applied', 'ok'); }
+        });
+        box.parentNode.insertBefore(applyBtn, box.nextSibling);
+      }
+    }
+    loadHealLog();
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+  finally { btn.disabled = false; btn.innerHTML = btn === $('heal-auto-btn') ? '⚡ Analyze + Auto-Apply' : '🔍 Analyze'; }
+}
+
+async function loadHealLog() {
+  try {
+    const r = await API('/api/heal/log');
+    const { log } = await r.json();
+    const list = $('heal-log');
+    if (!log.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No heals yet</p>'; return; }
+    list.innerHTML = log.map(h => `
+      <div class="heal-card ${h.applied ? '' : 'failed'}">
+        <div class="heal-file">${escHtml(h.file || 'unknown file')}</div>
+        <div class="heal-analysis">${escHtml(h.analysis || h.patch_summary || '')}</div>
+        <div class="heal-meta">
+          ${h.ts || ''} | confidence: ${((h.confidence || 0) * 100).toFixed(0)}%
+          ${h.backup ? ` | <a href="#" class="link" onclick="restoreBackup('${escHtml(h.backup)}');return false">↩ Restore</a>` : ''}
+        </div>
+      </div>`).join('');
+  } catch { }
+}
+
+async function restoreBackup(path) {
+  if (!confirm(`Restore from backup?\n${path}`)) return;
+  const r = await APIJ('/api/heal/restore', { backup_path: path });
+  const data = await r.json();
+  showToast(data.restored ? '✅ Restored' : '❌ Restore failed', data.restored ? 'ok' : 'err');
+}
+
+$('refresh-heal-log-btn').addEventListener('click', loadHealLog);
+$('refresh-backups-btn').addEventListener('click', async () => {
+  const r = await API('/api/heal/backups');
+  const { backups } = await r.json();
+  $('heal-log').innerHTML = backups.length
+    ? backups.map(b => `<div class="heal-card"><div class="heal-file">${escHtml(b.name)}</div><div class="heal-meta">${b.ts} | ${(b.size/1024).toFixed(1)} KB | <a href="#" class="link" onclick="restoreBackup('${escHtml(b.path)}');return false">↩ Restore</a></div></div>`).join('')
+    : '<p style="color:var(--muted);font-size:13px">No backups</p>';
+});
+
+document.querySelector('[data-tab="healer"]').addEventListener('click', loadHealLog);
+
+/* ═══════════════════════════════════════
+   TAB — DIGITAL TWIN
+═══════════════════════════════════════ */
+let _currentProbeQuestion = '';
+
+$('twin-name-btn').addEventListener('click', async () => {
+  const name = $('twin-name').value.trim();
+  if (!name) return showToast('Enter your name', 'err');
+  await APIJ('/api/twin/name', { name });
+  showToast(`Twin personalized for: ${name}`, 'ok');
+});
+
+$('twin-profile-btn').addEventListener('click', async () => {
+  const box = $('twin-summary');
+  box.textContent = 'Loading profile…';
+  try {
+    const r = await API('/api/twin/profile');
+    const data = await r.json();
+    const profile = data.profile;
+    const summary = data.summary;
+    box.textContent = summary + (Object.keys(profile).length
+      ? '\n\n── Profile fields ──\n' + Object.entries(profile).map(([k,v]) => `${k}: ${JSON.stringify(v).slice(0,80)}`).join('\n')
+      : '\n\n(Profile empty — ingest some files to train the twin)');
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+});
+
+// File ingestion
+const twinArea = $('twin-upload-area');
+const twinFileInput = $('twin-file-input');
+twinArea.addEventListener('click', () => twinFileInput.click());
+twinArea.addEventListener('dragover', e => { e.preventDefault(); twinArea.classList.add('dragover'); });
+twinArea.addEventListener('dragleave', () => twinArea.classList.remove('dragover'));
+twinArea.addEventListener('drop', async e => {
+  e.preventDefault(); twinArea.classList.remove('dragover');
+  if (e.dataTransfer.files.length) await ingestTwinFiles(e.dataTransfer.files);
+});
+twinFileInput.addEventListener('change', async () => { if (twinFileInput.files.length) await ingestTwinFiles(twinFileInput.files); });
+
+$('twin-ingest-file-btn').addEventListener('click', async () => {
+  if (twinFileInput.files.length) await ingestTwinFiles(twinFileInput.files);
+  else twinFileInput.click();
+});
+
+async function ingestTwinFiles(files) {
+  const box = $('twin-ingest-result');
+  box.textContent = `Ingesting ${files.length} file(s)…`;
+  let results = [];
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const r = await fetch('/api/twin/ingest/file', { method: 'POST', body: fd, headers: getAuthHeader() });
+      const data = await r.json();
+      results.push(`${f.name}: ${data.ok ? '✅' : '❌ ' + data.error}`);
+    } catch (e) { results.push(`${f.name}: ❌ ${e.message}`); }
+  }
+  box.textContent = results.join('\n');
+  showToast(`Twin trained on ${files.length} file(s)`, 'ok');
+}
+
+$('twin-ingest-dir-btn').addEventListener('click', async () => {
+  const path = $('twin-dir').value.trim();
+  if (!path) return showToast('Enter a directory path', 'err');
+  const box = $('twin-ingest-result');
+  box.textContent = `Ingesting directory: ${path}…`;
+  try {
+    const r = await APIJ('/api/twin/ingest/directory', { path });
+    const data = await r.json();
+    box.textContent = data.error
+      ? `Error: ${data.error}`
+      : `✅ Ingested ${data.ingested} files from ${path}`;
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+});
+
+// Ask the twin (streaming)
+$('twin-ask-btn').addEventListener('click', async () => {
+  const question = $('twin-question').value.trim();
+  if (!question) return showToast('Enter a question', 'err');
+  const box = $('twin-answer');
+  box.textContent = 'Your twin is thinking…';
+  $('twin-ask-btn').disabled = true;
+
+  try {
+    const res = await fetch('/api/twin/ask/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ question }),
+    });
+    box.textContent = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          box.textContent += line.slice(6);
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    }
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+  finally { $('twin-ask-btn').disabled = false; $('twin-ask-btn').textContent = 'Ask Twin'; }
+});
+
+// Probing session
+$('twin-probe-btn').addEventListener('click', async () => {
+  const box = $('twin-probe-question');
+  box.textContent = 'Generating question…';
+  try {
+    const r = await API('/api/twin/probe');
+    const data = await r.json();
+    _currentProbeQuestion = data.question;
+    box.textContent = data.question;
+  } catch (e) { box.textContent = `Error: ${e.message}`; }
+});
+
+$('twin-probe-submit-btn').addEventListener('click', async () => {
+  const answer = $('twin-probe-answer').value.trim();
+  if (!answer || !_currentProbeQuestion) return showToast('Generate a question and write your answer first', 'err');
+  try {
+    await APIJ('/api/twin/probe/answer', { question: _currentProbeQuestion, answer });
+    $('twin-probe-result').textContent = '✅ Answer recorded — twin profile updated';
+    $('twin-probe-answer').value = '';
+    showToast('Twin learned from your answer', 'ok');
+  } catch (e) { $('twin-probe-result').textContent = `Error: ${e.message}`; }
+});

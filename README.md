@@ -81,36 +81,83 @@ A production-grade autonomous AI agent powered by **Claude Opus 4.7** with an ag
 
 ## Quick Start
 
-### 1. Install
+### 🐧 Linux / macOS
 
 ```bash
-git clone https://github.com/abusultancom/-ai-agent.git
-cd -ai-agent
+# One-liner install
+curl -fsSL https://raw.githubusercontent.com/abusultancom/-ai-agent/main/scripts/setup.sh | bash
+```
+
+Or manually:
+
+```bash
+git clone https://github.com/abusultancom/-ai-agent.git ai-agent
+cd ai-agent
 pip install -r requirements.txt
 cp .env.example .env
-```
-
-### 2. Configure
-
-Edit `.env` and set your API key:
-
-```env
-ANTHROPIC_API_KEY=sk-ant-...
-MODEL=claude-opus-4-7
-```
-
-### 3. Run
-
-```bash
-# Web server + dashboard
+# Edit .env and set ANTHROPIC_API_KEY (or leave blank to use Ollama)
 python orchestrator.py serve
 # Dashboard at http://localhost:5000
+```
 
-# Run a single task from CLI
-python orchestrator.py run "Write a Python script that counts words in a file"
+---
 
-# Show task plan only (no execution)
-python orchestrator.py plan "Build a REST API for a todo list"
+### 🪟 Windows
+
+#### Option 1 — One-liner (PowerShell, recommended)
+
+Open **PowerShell as Administrator** and run:
+
+```powershell
+iex (irm "https://raw.githubusercontent.com/abusultancom/-ai-agent/main/scripts/setup.ps1")
+```
+
+This will:
+- Check Python 3.10+ and Git (opens download page if missing)
+- Clone the repo to `~\.ai-agent`
+- Create a virtual environment and install all dependencies
+- Guide you through `.env` configuration
+- Create a **desktop shortcut** to launch the server
+
+#### Option 2 — Manual
+
+**Prerequisites:** [Python 3.10+](https://www.python.org/downloads/) · [Git](https://git-scm.com/download/win)
+
+```cmd
+git clone https://github.com/abusultancom/-ai-agent.git ai-agent
+cd ai-agent
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+```
+
+Edit `.env` with Notepad:
+```cmd
+notepad .env
+```
+
+Set your API key (or leave blank to use Ollama locally):
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Start the server:
+```cmd
+scripts\start.bat
+```
+
+Or directly:
+```cmd
+.venv\Scripts\python orchestrator.py serve
+```
+
+Dashboard at **http://localhost:5000**
+
+#### Option 3 — Docker (Windows/Linux/macOS)
+
+```cmd
+docker compose up --build
 ```
 
 ---

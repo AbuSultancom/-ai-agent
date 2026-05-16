@@ -4,11 +4,11 @@ import logging
 import time
 from datetime import datetime
 
-import anthropic
 import psutil
 import requests
 from bs4 import BeautifulSoup
 
+from core import model_router
 from core.config import config
 
 logger = logging.getLogger(__name__)
@@ -86,14 +86,12 @@ def generate_briefing(custom_note: str = "") -> dict:
         + (f"\nSpecial Note: {custom_note}" if custom_note else "")
     )
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    resp = client.messages.create(
-        model=config.MODEL,
-        max_tokens=600,
+    result = model_router.chat(
+        [{"role": "user", "content": prompt}],
         system=_BRIEFING_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
+        max_tokens=600,
     )
-    briefing = "".join(b.text for b in resp.content if b.type == "text")
+    briefing = result if isinstance(result, str) else "".join(result)
 
     return {
         "briefing": briefing,

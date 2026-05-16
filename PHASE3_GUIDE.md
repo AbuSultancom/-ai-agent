@@ -31,11 +31,8 @@ Phase 3 focuses on enhancing the capabilities of our AI agent, making it more ef
 ## Deployment Instructions
 1. Clone the repository:
    ```bash
-   git clone https://github.com/AbuSultancom/-ai-agent.git
-   ```
-2. Navigate to the project directory:
-   ```bash
-   cd -ai-agent
+   git clone https://github.com/AbuSultancom/-ai-agent.git ai-agent
+   cd ai-agent
    ```
 3. Install dependencies:
    ```bash

@@ -9,7 +9,7 @@ import logging
 from collections.abc import Generator
 from dataclasses import dataclass, field
 
-import anthropic
+from core import model_router
 
 from core.config import config
 
@@ -56,21 +56,15 @@ class PipelineResult:
 
 
 class MultiAgentPipeline:
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-
     def _call_agent(self, role: str, task: str, context: str = "") -> str:
         system = ROLE_SYSTEMS.get(role, ROLE_SYSTEMS["writer"])
         content = task if not context else f"Context from previous steps:\n{context}\n\nYour task: {task}"
         try:
-            resp = self.client.messages.create(
-                model=config.MODEL,
-                max_tokens=config.MAX_TOKENS,
-                thinking={"type": "adaptive"},
-                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": content}],
+            result = model_router.chat(
+                [{"role": "user", "content": content}],
+                system=system,
             )
-            return next((b.text for b in resp.content if b.type == "text"), "")
+            return result if isinstance(result, str) else "".join(result)
         except Exception as exc:
             logger.exception("Agent %s failed", role)
             return f"[Error in {role}: {exc}]"

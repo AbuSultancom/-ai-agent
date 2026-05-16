@@ -119,6 +119,109 @@ def generate(prompt: str, model: str | None = None, system: str = "") -> str:
     return ollama_gen(prompt, model=model, system=system)
 
 
+def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+    system: str = "",
+    max_tokens: int | None = None,
+) -> dict:
+    """
+    Route a tool-use chat to Claude or Ollama.
+
+    Returns normalized dict:
+      text, tool_calls, stop_reason, _history_assistant, _backend
+    """
+    model = model or config.MODEL
+    max_tokens = max_tokens or config.MAX_TOKENS
+    system = system or _CHAT_SYSTEM
+
+    if is_claude(model):
+        return _claude_chat_with_tools(messages, tools, model, system, max_tokens)
+    return _ollama_chat_with_tools(messages, tools, model, system, max_tokens)
+
+
+def _claude_chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str,
+    system: str,
+    max_tokens: int,
+) -> dict:
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    kwargs: dict = dict(
+        model=model,
+        max_tokens=max_tokens,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        tools=tools,
+        messages=messages[-40:],
+    )
+    if model.startswith("claude-opus") or model.startswith("claude-sonnet"):
+        kwargs["thinking"] = {"type": "adaptive"}
+
+    try:
+        with client.messages.stream(**kwargs) as stream:
+            response = stream.get_final_message()
+
+        text = ""
+        tool_calls = []
+        for block in response.content:
+            if block.type == "text":
+                text += block.text
+            elif block.type == "tool_use":
+                tool_calls.append({"id": block.id, "name": block.name, "inputs": block.input})
+
+        return {
+            "text": text,
+            "tool_calls": tool_calls,
+            "stop_reason": response.stop_reason,
+            "_history_assistant": {"role": "assistant", "content": response.content},
+            "_backend": "claude",
+        }
+    except Exception as exc:
+        logger.exception("Claude tool-use error")
+        return {
+            "text": f"Claude error: {exc}",
+            "tool_calls": [],
+            "stop_reason": "end_turn",
+            "_history_assistant": {"role": "assistant", "content": f"Error: {exc}"},
+            "_backend": "claude",
+        }
+
+
+def _ollama_chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str,
+    system: str,
+    max_tokens: int,
+) -> dict:
+    from core.local_models import chat_with_tools as ollama_cwt
+    return ollama_cwt(messages, tools, model=model, system=system, max_tokens=max_tokens)
+
+
+def build_tool_result_messages(
+    tool_results: list[dict],
+    model: str | None = None,
+) -> list[dict]:
+    """
+    Build the tool-result messages for the right backend.
+    tool_results: [{"id": str, "result": str}]
+    Returns list of message dicts to extend the conversation.
+    """
+    model = model or config.MODEL
+    if is_claude(model):
+        return [{
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tr["id"], "content": tr["result"]}
+                for tr in tool_results
+            ],
+        }]
+    # Ollama: one "tool" role message per result
+    return [{"role": "tool", "content": tr["result"]} for tr in tool_results]
+
+
 def list_all_models() -> dict:
     """Return all available models: Claude (static list) + local Ollama models."""
     claude_models = [

@@ -30,8 +30,7 @@ class MemoryAgent:
 
     def summarize_and_store(self, session_id: str, conversation: list[dict]) -> str:
         """Summarize a conversation and store it in memory."""
-        import anthropic
-        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+        from core import model_router
 
         convo_text = "\n".join(
             f"{m['role'].upper()}: {m.get('content', '')}"
@@ -39,19 +38,12 @@ class MemoryAgent:
             if isinstance(m.get("content"), str)
         )
 
-        response = client.messages.create(
-            model=config.MODEL,
+        summary = model_router.chat(
+            [{"role": "user", "content": f"Summarize this conversation in 3-5 bullet points:\n\n{convo_text[:8000]}"}],
             max_tokens=1024,
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Summarize this conversation in 3-5 bullet points:\n\n{convo_text[:8000]}",
-                }
-            ],
         )
-        summary = next(
-            (b.text for b in response.content if b.type == "text"), ""
-        )
+        if not isinstance(summary, str):
+            summary = "".join(summary)
         key = f"session:{session_id}"
         self.memory.store(key, summary, {"session_id": session_id, "type": "summary"})
         return summary
