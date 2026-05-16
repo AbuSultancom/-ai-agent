@@ -1,12 +1,5 @@
-/* ───────── Helpers ───────── */
+/* ── Helpers ── */
 const $ = id => document.getElementById(id);
-const API = path => fetch(path, { headers: getAuthHeader() });
-const APIJ = (path, body, method = 'POST') =>
-  fetch(path, {
-    method,
-    headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-    body: JSON.stringify(body),
-  });
 
 function getAuthHeader() {
   const token = localStorage.getItem('jwt_token');
@@ -19,33 +12,23 @@ function getActiveModel() {
 
 function setActiveModel(model) {
   localStorage.setItem('active_model', model);
-  const gSel = $('global-model-select');
-  if (gSel && model) gSel.value = model;
-  const cSel = $('chat-model-select');
-  if (cSel && model) cSel.value = model;
+  const sel = $('global-model-select');
+  if (sel && model) sel.value = model;
   const badge = $('unified-model-badge');
   if (badge) badge.textContent = model || 'default model';
-}
-
-function timeAgo(iso) {
-  if (!iso) return '';
-  const diff = (Date.now() - new Date(iso)) / 1000;
-  if (diff < 60) return `${Math.round(diff)}s`;
-  if (diff < 3600) return `${Math.round(diff / 60)}m`;
-  if (diff < 86400) return `${Math.round(diff / 3600)}h`;
-  return `${Math.round(diff / 86400)}d`;
-}
-
-function renderMarkdown(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
 }
 
 function escHtml(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function renderMarkdown(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/```[\s\S]*?```/g, m => `<pre>${escHtml(m.slice(3, -3).replace(/^\w+\n/, ''))}</pre>`)
+    .replace(/\n/g, '<br>');
 }
 
 function showToast(msg, type = 'ok') {
@@ -56,83 +39,161 @@ function showToast(msg, type = 'ok') {
   setTimeout(() => t.classList.remove('show'), 2800);
 }
 
-/* ───────── Health check ───────── */
+/* ── Health check ── */
 async function checkHealth() {
   try {
-    const r = await API('/health');
+    const r = await fetch('/health', { headers: getAuthHeader() });
     $('health-dot').className = r.ok ? 'health-dot ok' : 'health-dot err';
   } catch { $('health-dot').className = 'health-dot err'; }
 }
 checkHealth();
 setInterval(checkHealth, 30000);
 
-/* ───────── Tab navigation ───────── */
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(s => s.classList.remove('active'));
-    btn.classList.add('active');
-    $(`tab-${btn.dataset.tab}`).classList.add('active');
-    if (btn.dataset.tab === 'models') loadModels();
-    if (btn.dataset.tab === 'monitoring') loadMonitoring();
-  });
+/* ── Model loading ── */
+async function loadModels() {
+  try {
+    const r = await fetch('/api/models', { headers: getAuthHeader() });
+    const data = await r.json();
+    const { claude = [], local = [], current_model = '' } = data;
+    const active = getActiveModel() || current_model;
+
+    let opts = '<option value="">Default</option>';
+    if (claude.length) {
+      opts += '<optgroup label="Claude Models">' +
+        claude.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name || m.id)}</option>`).join('') +
+        '</optgroup>';
+    }
+    if (local.length) {
+      opts += '<optgroup label="Local (Ollama)">' +
+        local.map(m => `<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('') +
+        '</optgroup>';
+    }
+
+    const sel = $('global-model-select');
+    sel.innerHTML = opts;
+    if (active) sel.value = active;
+
+    const badge = $('unified-model-badge');
+    if (badge) badge.textContent = active || (current_model ? current_model : 'default model');
+  } catch {}
+}
+loadModels();
+
+$('global-model-select').addEventListener('change', () => {
+  setActiveModel($('global-model-select').value);
+  if ($('global-model-select').value) showToast(`Model: ${$('global-model-select').value}`, 'ok');
 });
 
-/* ═══════════════════════════════════════
-   UNIFIED CHAT
-═══════════════════════════════════════ */
-let unifiedHistory = [];
-let unifiedStreaming = false;
+/* ── Conversation state ── */
+let conversationHistory = [];
+let streaming = false;
+let attachedFile = null;
 
-function chipSend(text) {
-  $('unified-input').value = text;
-  sendUnifiedMessage();
+/* ── Attachment handling ── */
+$('attach-btn').addEventListener('click', () => $('attach-input').click());
+$('attach-input').addEventListener('change', () => {
+  const file = $('attach-input').files[0];
+  if (!file) return;
+  attachedFile = file;
+  showAttachPreview(file);
+  $('attach-input').value = '';
+});
+
+function showAttachPreview(file) {
+  const preview = $('attach-preview');
+  preview.innerHTML = '';
+
+  const isImage = file.type.startsWith('image/');
+  let el;
+
+  if (isImage) {
+    el = document.createElement('div');
+    el.className = 'attach-thumb';
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    el.appendChild(img);
+  } else {
+    el = document.createElement('div');
+    el.className = 'attach-chip';
+    el.innerHTML = `<span>📎</span><span title="${escHtml(file.name)}">${escHtml(file.name)}</span>`;
+  }
+
+  const rm = document.createElement('button');
+  rm.className = 'attach-remove';
+  rm.textContent = '×';
+  rm.addEventListener('click', clearAttachment);
+  el.appendChild(rm);
+  preview.appendChild(el);
 }
 
-function newChat() {
-  unifiedHistory = [];
-  const msgs = $('unified-messages');
-  msgs.innerHTML = '';
-  const welcome = document.createElement('div');
-  welcome.id = 'unified-welcome';
-  welcome.className = 'unified-welcome';
-  welcome.innerHTML = `
-    <div class="welcome-icon">🤖</div>
-    <h2>AI Agent</h2>
-    <p>Ask anything or give a task — I'll use tools when needed.</p>
-    <div class="chip-row">
-      <button class="chip" onclick="chipSend('List Python files in the current directory')">📁 List files</button>
-      <button class="chip" onclick="chipSend('Write a Hello World Python script and save it to /tmp/hello.py')">🐍 Python script</button>
-      <button class="chip" onclick="chipSend('What tools do you have available?')">🛠️ Show tools</button>
-      <button class="chip" onclick="chipSend('Search for files matching *.py in the current directory')">🔍 Search files</button>
-    </div>`;
-  msgs.appendChild(welcome);
+function clearAttachment() {
+  attachedFile = null;
+  $('attach-preview').innerHTML = '';
 }
 
-function appendUserBubble(text) {
-  const welcome = $('unified-welcome');
+/* ── Message rendering ── */
+function scrollToBottom() {
+  const msgs = $('chat-messages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function appendUserBubble(text, file) {
+  const welcome = $('chat-welcome');
   if (welcome) welcome.remove();
+
   const row = document.createElement('div');
   row.className = 'umsg-row user';
-  row.innerHTML = `<div class="umsg-avatar">👤</div><div class="umsg-content">${escHtml(text).replace(/\n/g, '<br>')}</div>`;
-  $('unified-messages').appendChild(row);
-  scrollUnified();
+
+  const avatar = document.createElement('div');
+  avatar.className = 'umsg-avatar';
+  avatar.textContent = '👤';
+
+  const content = document.createElement('div');
+  content.className = 'umsg-content';
+
+  if (file) {
+    if (file.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.className = 'umsg-image';
+      img.src = URL.createObjectURL(file);
+      content.appendChild(img);
+    } else {
+      const chip = document.createElement('div');
+      chip.className = 'umsg-file-chip';
+      chip.innerHTML = `<span>📎</span><span>${escHtml(file.name)}</span>`;
+      content.appendChild(chip);
+    }
+  }
+
+  if (text) {
+    const textEl = document.createElement('div');
+    textEl.innerHTML = escHtml(text).replace(/\n/g, '<br>');
+    content.appendChild(textEl);
+  }
+
+  row.appendChild(avatar);
+  row.appendChild(content);
+  $('chat-messages').appendChild(row);
+  scrollToBottom();
 }
 
 function appendAssistantBubble() {
   const row = document.createElement('div');
   row.className = 'umsg-row assistant';
+
   const avatar = document.createElement('div');
   avatar.className = 'umsg-avatar';
   avatar.textContent = '🤖';
+
   const content = document.createElement('div');
   content.className = 'umsg-content';
   content.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+
   row.appendChild(avatar);
   row.appendChild(content);
-  $('unified-messages').appendChild(row);
-  scrollUnified();
-  return { row, content };
+  $('chat-messages').appendChild(row);
+  scrollToBottom();
+  return content;
 }
 
 function appendToolCard(parentEl, name, args) {
@@ -146,42 +207,69 @@ function appendToolCard(parentEl, name, args) {
       <span class="tool-chevron">▶</span>
     </div>
     <div class="tool-body">
-      <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Arguments:</div>
       <pre>${escHtml(args)}</pre>
-      <div class="tool-result-label">Result:</div>
-      <pre class="tool-result">…</pre>
     </div>`;
   parentEl.appendChild(card);
-  scrollUnified();
+  scrollToBottom();
   return card;
 }
 
-function scrollUnified() {
-  const msgs = $('unified-messages');
-  msgs.scrollTop = msgs.scrollHeight;
+/* ── Chip quick-send ── */
+function chipSend(text) {
+  $('unified-input').value = text;
+  sendSmartMessage();
 }
 
-async function sendUnifiedMessage() {
-  const input = $('unified-input');
-  const text = input.value.trim();
-  if (!text || unifiedStreaming) return;
-  input.value = '';
-  input.style.height = 'auto';
-  unifiedStreaming = true;
+/* ── New chat ── */
+function newChat() {
+  conversationHistory = [];
+  $('chat-messages').innerHTML = `
+    <div id="chat-welcome" class="chat-welcome">
+      <div class="welcome-icon">🤖</div>
+      <h1>AI Agent</h1>
+      <p>Ask anything · Upload an image · Attach a file</p>
+      <div class="chip-row">
+        <button class="chip" onclick="chipSend('List all Python files in the current directory')">📁 List files</button>
+        <button class="chip" onclick="chipSend('Write a Hello World Python script and save it to /tmp/hello.py')">🐍 Python script</button>
+        <button class="chip" onclick="chipSend('What tools and capabilities do you have?')">🛠️ Show tools</button>
+        <button class="chip" onclick="chipSend('Summarize the project structure')">🔍 Analyze project</button>
+      </div>
+    </div>`;
+  clearAttachment();
+}
+$('new-chat-btn').addEventListener('click', newChat);
+
+/* ── Send ── */
+async function sendSmartMessage() {
+  const text = $('unified-input').value.trim();
+  const file = attachedFile;
+  if ((!text && !file) || streaming) return;
+
+  $('unified-input').value = '';
+  $('unified-input').style.height = 'auto';
+  streaming = true;
   $('unified-send-btn').disabled = true;
 
-  appendUserBubble(text);
-  unifiedHistory.push({ role: 'user', content: text });
+  appendUserBubble(text, file);
+  if (file) clearAttachment();
 
-  const { row, content } = appendAssistantBubble();
+  conversationHistory.push({ role: 'user', content: text || `[Attached file: ${file?.name}]` });
+
+  const content = appendAssistantBubble();
   let textAccum = '';
 
   try {
+    const fd = new FormData();
+    if (text) fd.append('message', text);
+    fd.append('history', JSON.stringify(conversationHistory.slice(-20)));
     const model = getActiveModel();
-    const res = await fetch('/api/unified/stream', {
+    if (model) fd.append('model', model);
+    if (file) fd.append('files', file);
+
+    const res = await fetch('/api/smart/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ message: text, history: unifiedHistory.slice(-20), model: model || undefined }),
+      headers: getAuthHeader(),
+      body: fd,
     });
 
     if (!res.ok) {
@@ -214,1403 +302,31 @@ async function sendUnifiedMessage() {
           } else if (evt.type === 'tool') {
             textEl = null;
             appendToolCard(content, evt.name, evt.args);
+          } else if (evt.type === 'image') {
+            const img = document.createElement('img');
+            img.src = evt.url;
+            img.style.cssText = 'max-width:100%;border-radius:8px;margin-top:8px;border:1px solid var(--border)';
+            content.appendChild(img);
           }
-          scrollUnified();
+          scrollToBottom();
         } catch {}
       }
     }
 
-    unifiedHistory.push({ role: 'assistant', content: textAccum || '(no response)' });
+    conversationHistory.push({ role: 'assistant', content: textAccum || '(no response)' });
   } catch (err) {
     content.innerHTML = `<span style="color:var(--err)">Error: ${escHtml(err.message)}</span>`;
   } finally {
-    unifiedStreaming = false;
+    streaming = false;
     $('unified-send-btn').disabled = false;
   }
 }
 
-$('unified-send-btn').addEventListener('click', sendUnifiedMessage);
+$('unified-send-btn').addEventListener('click', sendSmartMessage);
 $('unified-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUnifiedMessage(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSmartMessage(); }
 });
 $('unified-input').addEventListener('input', function () {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 200) + 'px';
-});
-$('new-chat-btn').addEventListener('click', newChat);
-
-/* ───────── Sidebar toggle ───────── */
-$('sidebar-toggle').addEventListener('click', () => {
-  $('sidebar').classList.toggle('collapsed');
-});
-
-/* ───────── Model badge ───────── */
-function updateModelBadge() {
-  const model = getActiveModel();
-  const badge = $('unified-model-badge');
-  if (badge) badge.textContent = model || 'default model';
-}
-updateModelBadge();
-
-/* ═══════════════════════════════════════
-   TAB 1 — TASKS
-═══════════════════════════════════════ */
-const taskOutput = $('task-output');
-let currentEventSource = null;
-
-async function runTask() {
-  const task = $('task-input').value.trim();
-  if (!task) return;
-  const btn = $('run-task-btn');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Running… <span class="spinner"></span>';
-  taskOutput.textContent = '';
-
-  try {
-    const model = getActiveModel();
-    const body = { task };
-    if (model) body.model = model;
-    const res = await APIJ('/api/task', body);
-    const { task_id } = await res.json();
-    if (!task_id) throw new Error('Task creation failed');
-
-    if (currentEventSource) currentEventSource.close();
-    currentEventSource = new EventSource(`/api/task/${task_id}/stream`);
-    currentEventSource.onmessage = e => {
-      taskOutput.textContent += e.data;
-      taskOutput.scrollTop = taskOutput.scrollHeight;
-    };
-    currentEventSource.addEventListener('done', e => {
-      currentEventSource.close();
-      btn.disabled = false;
-      btn.textContent = '▶ Run';
-      loadTasks();
-      showToast(e.data === 'completed' ? '✅ Task completed' : '❌ Task failed',
-        e.data === 'completed' ? 'ok' : 'err');
-    });
-    currentEventSource.onerror = () => {
-      currentEventSource.close();
-      btn.disabled = false;
-      btn.textContent = '▶ Run';
-    };
-  } catch (err) {
-    taskOutput.textContent = `Error: ${err.message}`;
-    btn.disabled = false;
-    btn.textContent = '▶ Run';
-  }
-}
-
-$('run-task-btn').addEventListener('click', runTask);
-$('task-input').addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') runTask(); });
-$('clear-output-btn').addEventListener('click', () => { taskOutput.textContent = ''; });
-$('refresh-tasks-btn').addEventListener('click', loadTasks);
-
-async function loadTasks() {
-  try {
-    const r = await API('/api/tasks');
-    const { tasks } = await r.json();
-    const list = $('tasks-list');
-    if (!tasks.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No tasks yet</p>'; return; }
-    list.innerHTML = tasks.map(t => `
-      <div class="task-card" onclick="showTaskOutput('${t.id}','${escHtml(t.task)}')">
-        <div class="task-head">
-          <span class="task-text">${escHtml(t.task)}</span>
-          <span class="task-time">${timeAgo(t.created_at)}</span>
-          <span class="badge ${t.status}">${t.status}</span>
-        </div>
-      </div>`).join('');
-  } catch { }
-}
-
-function showTaskOutput(id, taskText) {
-  $('task-input').value = taskText;
-  API(`/api/task/${id}`).then(r => r.json()).then(t => {
-    taskOutput.textContent = t.output || '(no output)';
-    taskOutput.scrollTop = taskOutput.scrollHeight;
-  });
-}
-
-loadTasks();
-
-/* ═══════════════════════════════════════
-   TAB 2 — CHAT (with Personas)
-═══════════════════════════════════════ */
-let chatHistory = JSON.parse(localStorage.getItem('chat_history') || '[]');
-
-function renderChat() {
-  const msgs = $('chat-messages');
-  msgs.innerHTML = chatHistory.map(m => `
-    <div class="msg ${m.role}">${renderMarkdown(escHtml(m.content))}</div>`).join('');
-  msgs.scrollTop = msgs.scrollHeight;
-}
-
-async function sendChat() {
-  const input = $('chat-input');
-  const text = input.value.trim();
-  if (!text) return;
-  const personaId = $('persona-select').value;
-  const modelOverride = $('chat-model-select').value || getActiveModel() || '';
-  input.value = '';
-  chatHistory.push({ role: 'user', content: text });
-  renderChat();
-
-  const typing = document.createElement('div');
-  typing.className = 'msg assistant typing';
-  typing.textContent = 'Typing…';
-  $('chat-messages').appendChild(typing);
-  $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
-
-  try {
-    const endpoint = personaId !== 'default' ? '/api/chat/persona' : '/api/chat';
-    const body = personaId !== 'default'
-      ? { message: text, persona_id: personaId }
-      : { message: text, history: chatHistory.slice(-20) };
-    if (modelOverride) body.model = modelOverride;
-    const res = await APIJ(endpoint, body);
-    const data = await res.json();
-    typing.remove();
-    const reply = data.reply || data.error || 'No response';
-    chatHistory.push({ role: 'assistant', content: reply });
-    localStorage.setItem('chat_history', JSON.stringify(chatHistory.slice(-60)));
-    renderChat();
-  } catch (err) {
-    typing.remove();
-    chatHistory.push({ role: 'assistant', content: `Error: ${err.message}` });
-    renderChat();
-  }
-}
-
-$('chat-send-btn').addEventListener('click', sendChat);
-$('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
-$('chat-clear-btn').addEventListener('click', () => {
-  chatHistory = [];
-  localStorage.removeItem('chat_history');
-  renderChat();
-  APIJ('/api/chat/clear', {});
-});
-
-renderChat();
-
-/* ═══════════════════════════════════════
-   TAB 3 — MEMORY
-═══════════════════════════════════════ */
-$('memory-search-btn').addEventListener('click', async () => {
-  const q = $('memory-query').value.trim();
-  if (!q) return;
-  const box = $('memory-results');
-  box.textContent = 'Searching…';
-  try {
-    const r = await APIJ('/api/memory/search', { query: q, n_results: 8 });
-    const { results } = await r.json();
-    if (!results.length) { box.textContent = 'No results found'; return; }
-    box.innerHTML = results.map(r =>
-      `<div style="margin-bottom:12px"><strong style="color:var(--accent2)">${escHtml(r.key)}</strong>` +
-      `<span style="color:var(--muted);font-size:12px"> (${r.score || ''})</span><br>${escHtml(r.content)}</div>`
-    ).join('<hr style="border-color:var(--border);margin:10px 0">');
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('memory-store-btn').addEventListener('click', async () => {
-  const key = $('memory-key').value.trim();
-  const content = $('memory-content').value.trim();
-  if (!key || !content) return showToast('Key and content are required', 'err');
-  const r = await APIJ('/api/memory', { key, content });
-  const data = await r.json();
-  $('memory-store-result').textContent = data.stored ? `✅ Saved: ${key}` : JSON.stringify(data);
-  $('memory-key').value = '';
-  $('memory-content').value = '';
-});
-
-/* ═══════════════════════════════════════
-   TAB 4 — RAG
-═══════════════════════════════════════ */
-const uploadArea = $('upload-area');
-const fileInput = $('file-input');
-
-uploadArea.addEventListener('click', () => fileInput.click());
-uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
-uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
-uploadArea.addEventListener('drop', e => {
-  e.preventDefault();
-  uploadArea.classList.remove('dragover');
-  uploadFiles(e.dataTransfer.files);
-});
-fileInput.addEventListener('change', () => uploadFiles(fileInput.files));
-
-async function uploadFiles(files) {
-  const result = $('upload-result');
-  for (const file of files) {
-    result.textContent = `Uploading ${file.name}…`;
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      const r = await fetch('/api/rag/upload', { method: 'POST', body: fd, headers: getAuthHeader() });
-      const data = await r.json();
-      result.textContent = data.message || JSON.stringify(data);
-      showToast(`✅ ${file.name} uploaded`, 'ok');
-      loadDocs();
-    } catch (e) { result.textContent = `Error: ${e.message}`; }
-  }
-}
-
-$('rag-ask-btn').addEventListener('click', async () => {
-  const q = $('rag-query').value.trim();
-  if (!q) return;
-  const box = $('rag-answer');
-  box.textContent = 'Searching documents…';
-  try {
-    const r = await APIJ('/api/rag/query', { query: q });
-    const data = await r.json();
-    box.textContent = data.answer || data.error || 'No answer found';
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('refresh-docs-btn').addEventListener('click', loadDocs);
-
-async function loadDocs() {
-  try {
-    const r = await API('/api/rag/documents');
-    const { documents } = await r.json();
-    const list = $('docs-list');
-    if (!documents.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No documents yet</p>'; return; }
-    list.innerHTML = documents.map(d => `
-      <div class="task-card">
-        <div class="task-head">
-          <span class="task-text">📄 ${escHtml(d.name)}</span>
-          <span class="task-time">${d.chunks} chunks</span>
-          <button class="btn danger small" onclick="deleteDoc('${escHtml(d.name)}')">Delete</button>
-        </div>
-      </div>`).join('');
-  } catch { }
-}
-
-async function deleteDoc(name) {
-  await APIJ('/api/rag/documents', { name }, 'DELETE');
-  loadDocs();
-  showToast(`🗑️ ${name} deleted`);
-}
-
-loadDocs();
-
-/* ═══════════════════════════════════════
-   TAB 5 — VISION
-═══════════════════════════════════════ */
-let visionFile = null;
-const visionArea = $('vision-upload-area');
-const visionInput = $('vision-file-input');
-const visionPreview = $('vision-preview');
-
-visionArea.addEventListener('click', () => visionInput.click());
-visionArea.addEventListener('dragover', e => { e.preventDefault(); visionArea.classList.add('dragover'); });
-visionArea.addEventListener('dragleave', () => visionArea.classList.remove('dragover'));
-visionArea.addEventListener('drop', e => {
-  e.preventDefault();
-  visionArea.classList.remove('dragover');
-  if (e.dataTransfer.files[0]) setVisionFile(e.dataTransfer.files[0]);
-});
-visionInput.addEventListener('change', () => { if (visionInput.files[0]) setVisionFile(visionInput.files[0]); });
-
-function setVisionFile(file) {
-  visionFile = file;
-  const url = URL.createObjectURL(file);
-  visionPreview.src = url;
-  visionPreview.style.display = 'block';
-}
-
-$('vision-analyze-btn').addEventListener('click', async () => {
-  if (!visionFile) return showToast('Select an image first', 'err');
-  const box = $('vision-result');
-  box.textContent = 'Analyzing…';
-  const fd = new FormData();
-  fd.append('image', visionFile);
-  const q = $('vision-question').value.trim();
-  if (q) fd.append('question', q);
-  try {
-    const r = await fetch('/api/vision/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    box.textContent = data.analysis || data.error || 'No result';
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('vision-ocr-btn').addEventListener('click', async () => {
-  if (!visionFile) return showToast('Select an image first', 'err');
-  const box = $('vision-result');
-  box.textContent = 'Extracting text…';
-  const fd = new FormData();
-  fd.append('image', visionFile);
-  try {
-    const r = await fetch('/api/vision/ocr', { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    box.textContent = data.text || data.error || 'No text found';
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('vision-url-btn').addEventListener('click', async () => {
-  const url = $('vision-url').value.trim();
-  if (!url) return showToast('Enter image URL', 'err');
-  const box = $('vision-url-result');
-  box.textContent = 'Analyzing…';
-  try {
-    const r = await APIJ('/api/vision/analyze', { url, question: $('vision-url-question').value.trim() });
-    const data = await r.json();
-    box.textContent = data.analysis || data.error || 'No result';
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-/* ═══════════════════════════════════════
-   TAB 6 — DATA ANALYSIS
-═══════════════════════════════════════ */
-let dataFile = null;
-const dataArea = $('data-upload-area');
-const dataInput = $('data-file-input');
-
-dataArea.addEventListener('click', () => dataInput.click());
-dataArea.addEventListener('dragover', e => { e.preventDefault(); dataArea.classList.add('dragover'); });
-dataArea.addEventListener('dragleave', () => dataArea.classList.remove('dragover'));
-dataArea.addEventListener('drop', e => {
-  e.preventDefault();
-  dataArea.classList.remove('dragover');
-  if (e.dataTransfer.files[0]) { dataFile = e.dataTransfer.files[0]; dataArea.querySelector('span').textContent = `📊 ${dataFile.name}`; }
-});
-dataInput.addEventListener('change', () => {
-  if (dataInput.files[0]) { dataFile = dataInput.files[0]; dataArea.querySelector('span').textContent = `📊 ${dataFile.name}`; }
-});
-
-$('data-analyze-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
-  const box = $('data-result');
-  box.textContent = 'Analyzing…';
-  const fd = new FormData();
-  fd.append('file', dataFile);
-  const q = $('data-question').value.trim();
-  if (q) fd.append('question', q);
-  try {
-    const r = await fetch('/api/data/analyze', { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    box.textContent = data.answer || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('data-summary-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
-  const box = $('data-result');
-  box.textContent = 'Loading…';
-  const fd = new FormData();
-  fd.append('file', dataFile);
-  try {
-    const r = await fetch('/api/data/upload', { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    box.textContent = data.summary || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('chart-btn').addEventListener('click', async () => {
-  if (!dataFile) return showToast('Select a CSV or Excel file', 'err');
-  const resultDiv = $('chart-result');
-  resultDiv.innerHTML = '<p style="color:var(--muted)">Generating chart…</p>';
-  const fd = new FormData();
-  fd.append('file', dataFile);
-  fd.append('chart_type', $('chart-type').value);
-  fd.append('x_col', $('chart-x').value.trim());
-  fd.append('y_col', $('chart-y').value.trim());
-  try {
-    const r = await fetch('/api/data/chart', { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    if (data.url) {
-      resultDiv.innerHTML = `<img src="${data.url}" alt="chart" />`;
-    } else {
-      resultDiv.textContent = data.error || JSON.stringify(data);
-    }
-  } catch (e) { resultDiv.textContent = `Error: ${e.message}`; }
-});
-
-/* ═══════════════════════════════════════
-   TAB 7 — PERSONAS
-═══════════════════════════════════════ */
-$('refresh-personas-btn').addEventListener('click', loadPersonas);
-
-async function loadPersonas() {
-  try {
-    const r = await API('/api/personas');
-    const { personas } = await r.json();
-    const grid = $('personas-list');
-    grid.innerHTML = personas.map(p => `
-      <div class="persona-card" onclick="selectPersona('${p.id}')">
-        <div class="p-emoji">${p.emoji || '🤖'}</div>
-        <div class="p-name">${escHtml(p.name)}</div>
-        <div class="p-desc">${escHtml(p.description || '')}</div>
-        ${p.builtin ? '' : `<button class="btn danger small p-badge" onclick="deletePersona(event,'${p.id}')">Delete</button>`}
-      </div>`).join('');
-
-    const sel = $('persona-select');
-    const existingValues = [...sel.options].map(o => o.value);
-    personas.filter(p => !p.builtin && !existingValues.includes(p.id)).forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.id;
-      opt.textContent = `${p.emoji || '🤖'} ${p.name}`;
-      sel.appendChild(opt);
-    });
-  } catch { }
-}
-
-function selectPersona(id) {
-  $('persona-select').value = id;
-  document.querySelector('[data-tab="chat"]').click();
-  showToast(`Persona selected: ${id}`, 'ok');
-}
-
-async function deletePersona(evt, id) {
-  evt.stopPropagation();
-  const r = await fetch(`/api/personas/${id}`, { method: 'DELETE', headers: getAuthHeader() });
-  const data = await r.json();
-  if (data.deleted) { showToast('Deleted', 'ok'); loadPersonas(); }
-  else showToast(data.error || 'Error', 'err');
-}
-
-$('persona-create-btn').addEventListener('click', async () => {
-  const pid = $('persona-id').value.trim();
-  const name = $('persona-name').value.trim();
-  const emoji = $('persona-emoji').value.trim() || '🤖';
-  const desc = $('persona-desc').value.trim();
-  const system = $('persona-system').value.trim();
-  if (!pid || !name || !system) return showToast('ID, name, and system prompt are required', 'err');
-  const r = await APIJ('/api/personas', { id: pid, name, description: desc, system, emoji });
-  const data = await r.json();
-  $('persona-create-result').textContent = data.id ? `✅ Created: ${data.name}` : JSON.stringify(data);
-  if (data.id) { loadPersonas(); $('persona-id').value = ''; $('persona-name').value = ''; $('persona-system').value = ''; }
-});
-
-loadPersonas();
-
-/* ═══════════════════════════════════════
-   TAB 8 — PROMPT TEMPLATES
-═══════════════════════════════════════ */
-$('refresh-templates-btn').addEventListener('click', loadTemplates);
-
-async function loadTemplates() {
-  try {
-    const r = await API('/api/templates');
-    const { templates } = await r.json();
-    const list = $('templates-list');
-    list.innerHTML = templates.map(t => `
-      <div class="template-card">
-        <div class="tmpl-info">
-          <div class="tmpl-name">${escHtml(t.name)}</div>
-          <div class="tmpl-desc">${escHtml(t.description || '')}</div>
-          <div class="tmpl-vars">Variables: ${(t.variables || []).map(v => `{{${v}}}`).join(', ')}</div>
-        </div>
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          <button class="btn secondary small" onclick="selectTemplate('${t.id}')">Use</button>
-          ${t.builtin ? '' : `<button class="btn danger small" onclick="deleteTemplate('${t.id}')">Delete</button>`}
-        </div>
-      </div>`).join('');
-
-    const sel = $('template-select');
-    sel.innerHTML = '<option value="">— Select a template —</option>' +
-      templates.map(t => `<option value="${t.id}">${escHtml(t.name)}</option>`).join('');
-  } catch { }
-}
-
-function selectTemplate(id) {
-  $('template-select').value = id;
-  buildTemplateVarsForm(id);
-}
-
-$('template-select').addEventListener('change', () => {
-  buildTemplateVarsForm($('template-select').value);
-});
-
-async function buildTemplateVarsForm(id) {
-  if (!id) { $('template-vars-form').innerHTML = ''; return; }
-  try {
-    const r = await API(`/api/templates/${id}`);
-    const t = await r.json();
-    $('template-vars-form').innerHTML = (t.variables || []).map(v =>
-      `<div><label style="color:var(--muted);font-size:13px;display:block;margin-bottom:4px">{{${v}}}</label>
-       <input type="text" id="tvar-${v}" placeholder="${v}" /></div>`
-    ).join('');
-  } catch { }
-}
-
-$('template-run-btn').addEventListener('click', async () => {
-  const id = $('template-select').value;
-  if (!id) return showToast('Select a template', 'err');
-  const vars = collectTemplateVars();
-  const box = $('template-result');
-  box.textContent = 'Running…';
-  try {
-    const r = await APIJ(`/api/templates/${id}/run`, { variables: vars });
-    const data = await r.json();
-    box.textContent = data.output || data.error || JSON.stringify(data);
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('template-preview-btn').addEventListener('click', async () => {
-  const id = $('template-select').value;
-  if (!id) return showToast('Select a template', 'err');
-  const vars = collectTemplateVars();
-  try {
-    const r = await APIJ(`/api/templates/${id}/render`, { variables: vars });
-    const data = await r.json();
-    $('template-result').textContent = data.rendered || data.error || JSON.stringify(data);
-  } catch (e) { $('template-result').textContent = `Error: ${e.message}`; }
-});
-
-function collectTemplateVars() {
-  const vars = {};
-  document.querySelectorAll('#template-vars-form input').forEach(inp => {
-    const key = inp.id.replace('tvar-', '');
-    vars[key] = inp.value;
-  });
-  return vars;
-}
-
-$('new-tmpl-btn').addEventListener('click', async () => {
-  const name = $('new-tmpl-name').value.trim();
-  const tmpl = $('new-tmpl-text').value.trim();
-  const desc = $('new-tmpl-desc').value.trim();
-  if (!name || !tmpl) return showToast('Name and template body are required', 'err');
-  const r = await APIJ('/api/templates', { name, template: tmpl, description: desc });
-  const data = await r.json();
-  $('new-tmpl-result').textContent = data.id ? `✅ Saved: ${data.name}` : JSON.stringify(data);
-  if (data.id) { loadTemplates(); $('new-tmpl-name').value = ''; $('new-tmpl-text').value = ''; }
-});
-
-async function deleteTemplate(id) {
-  const r = await fetch(`/api/templates/${id}`, { method: 'DELETE', headers: getAuthHeader() });
-  const data = await r.json();
-  if (data.deleted) { showToast('Deleted', 'ok'); loadTemplates(); }
-  else showToast(data.error || 'Error', 'err');
-}
-
-loadTemplates();
-
-/* ═══════════════════════════════════════
-   TAB 9 — BATCH
-═══════════════════════════════════════ */
-$('batch-run-btn').addEventListener('click', async () => {
-  const lines = $('batch-input').value.trim().split('\n').map(l => l.trim()).filter(Boolean);
-  if (!lines.length) return showToast('Enter at least one task', 'err');
-  const box = $('batch-result');
-  const btn = $('batch-run-btn');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Running… <span class="spinner"></span>';
-  box.textContent = `Running ${lines.length} tasks in parallel…`;
-  try {
-    const body = { tasks: lines };
-    const model = getActiveModel();
-    if (model) body.model = model;
-    const r = await APIJ('/api/batch', body);
-    const data = await r.json();
-    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
-    box.innerHTML = `<strong>✅ ${data.completed} completed | ❌ ${data.failed} failed</strong>\n\n` +
-      data.results.map((res, i) =>
-        `--- Task ${i + 1} [${res.status}] ---\n${res.task}\n\n${res.output || res.error || ''}`
-      ).join('\n\n═══════════════════\n\n');
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-  finally { btn.disabled = false; btn.textContent = '▶ Run All'; }
-});
-
-/* ═══════════════════════════════════════
-   TAB 10 — SCHEDULER
-═══════════════════════════════════════ */
-$('sched-add-btn').addEventListener('click', async () => {
-  const name = $('sched-name').value.trim();
-  const task = $('sched-task').value.trim();
-  const cron = $('sched-cron').value.trim();
-  if (!name || !task || !cron) return showToast('All fields are required', 'err');
-  const r = await APIJ('/api/scheduler/jobs', { name, task, cron });
-  const data = await r.json();
-  $('sched-result').textContent = data.id ? `✅ Scheduled: ${data.id}` : JSON.stringify(data);
-  $('sched-name').value = ''; $('sched-task').value = ''; $('sched-cron').value = '';
-  loadJobs();
-});
-
-$('refresh-sched-btn').addEventListener('click', loadJobs);
-
-async function loadJobs() {
-  try {
-    const r = await API('/api/scheduler/jobs');
-    const { jobs } = await r.json();
-    const list = $('sched-list');
-    if (!jobs.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No scheduled jobs</p>'; return; }
-    list.innerHTML = jobs.map(j => `
-      <div class="task-card">
-        <div class="task-head">
-          <span class="task-text">⏰ ${escHtml(j.name)} — <code style="font-size:12px">${escHtml(j.cron)}</code></span>
-          <span class="task-time">${j.next_run ? 'Next: ' + j.next_run : ''}</span>
-          <button class="btn danger small" onclick="deleteJob('${j.id}')">Delete</button>
-        </div>
-        <div style="color:var(--muted);font-size:13px;margin-top:4px">${escHtml(j.task).slice(0, 80)}</div>
-      </div>`).join('');
-  } catch { }
-}
-
-async function deleteJob(id) {
-  await fetch(`/api/scheduler/jobs/${id}`, { method: 'DELETE', headers: getAuthHeader() });
-  loadJobs();
-}
-
-loadJobs();
-
-/* ═══════════════════════════════════════
-   TAB 11 — MODELS
-═══════════════════════════════════════ */
-async function loadModels() {
-  const grid = $('models-grid');
-  const status = $('models-status');
-  grid.innerHTML = '<p style="color:var(--muted)">Loading models…</p>';
-  try {
-    const r = await API('/api/models');
-    const data = await r.json();
-    const { claude = [], local = [], ollama_available = false, current_model = '' } = data;
-
-    status.textContent = ollama_available
-      ? `✅ Ollama connected — ${local.length} local model(s) available`
-      : '⚠️ Ollama not running — only Claude models available';
-
-    const activeModel = getActiveModel() || current_model;
-    let html = '';
-
-    if (claude.length) {
-      html += `<div style="grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:4px">── Claude (Anthropic) ──</div>`;
-      html += claude.map(m => `
-        <div class="model-card ${activeModel === m.id ? 'active-model' : ''}">
-          <div class="m-name">${escHtml(m.name || m.id)}</div>
-          <div class="m-provider">Anthropic</div>
-          <div class="m-size">${escHtml(m.description || '')}</div>
-          <div class="m-actions">
-            <button class="btn secondary small" onclick="useModel('${escHtml(m.id)}')">Use</button>
-          </div>
-        </div>`).join('');
-    }
-
-    if (local.length) {
-      html += `<div style="grid-column:1/-1;color:var(--muted);font-size:12px;margin-top:8px">── Local (Ollama) ──</div>`;
-      html += local.map(m => `
-        <div class="model-card ${activeModel === m.name ? 'active-model' : ''}">
-          <div class="m-name">${escHtml(m.name)}</div>
-          <div class="m-provider">Local / Ollama</div>
-          <div class="m-size">${m.size ? (m.size / 1e9).toFixed(1) + ' GB' : ''}</div>
-          <div class="m-actions">
-            <button class="btn secondary small" onclick="useModel('${escHtml(m.name)}')">Use</button>
-            <button class="btn danger small" onclick="deleteLocalModel('${escHtml(m.name)}')">Delete</button>
-          </div>
-        </div>`).join('');
-    }
-
-    if (!claude.length && !local.length) {
-      html = '<p style="color:var(--muted)">No models found. Check your API key and Ollama status.</p>';
-    }
-
-    grid.innerHTML = html;
-    loadAllModelSelects(data);
-  } catch (e) {
-    grid.textContent = `Error: ${e.message}`;
-  }
-}
-
-function useModel(modelId) {
-  setActiveModel(modelId);
-  showToast(`Active model: ${modelId}`, 'ok');
-  loadModels();
-}
-
-async function deleteLocalModel(name) {
-  if (!confirm(`Delete local model "${name}"?`)) return;
-  try {
-    const r = await APIJ('/api/models/delete', { name });
-    const data = await r.json();
-    if (data.deleted) { showToast(`Deleted: ${name}`, 'ok'); loadModels(); }
-    else showToast(data.error || 'Delete failed', 'err');
-  } catch (e) { showToast(`Error: ${e.message}`, 'err'); }
-}
-
-function loadAllModelSelects(data) {
-  const { claude = [], local = [], current_model = '' } = data || {};
-  const activeModel = getActiveModel() || current_model;
-
-  const buildOptions = () => {
-    let opts = '<option value="">Default (config)</option>';
-    if (claude.length) {
-      opts += `<optgroup label="Claude Models">`;
-      opts += claude.map(m => `<option value="${escHtml(m.id)}">${escHtml(m.name || m.id)}</option>`).join('');
-      opts += `</optgroup>`;
-    }
-    if (local.length) {
-      opts += `<optgroup label="Local (Ollama)">`;
-      opts += local.map(m => `<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
-      opts += `</optgroup>`;
-    }
-    return opts;
-  };
-
-  const gSel = $('global-model-select');
-  const cSel = $('chat-model-select');
-  const opts = buildOptions();
-  if (gSel) { gSel.innerHTML = opts; if (activeModel) gSel.value = activeModel; }
-  if (cSel) { cSel.innerHTML = opts; if (activeModel) cSel.value = activeModel; }
-}
-
-/* Pull a local model via SSE */
-$('pull-model-btn').addEventListener('click', pullModel);
-
-async function pullModel() {
-  const customVal = $('pull-model-custom').value.trim();
-  const selectVal = $('pull-model-select').value;
-  const modelName = customVal || selectVal;
-  if (!modelName) return showToast('Select or type a model name', 'err');
-
-  const box = $('pull-result');
-  const btn = $('pull-model-btn');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Pulling… <span class="spinner"></span>';
-  box.textContent = `Pulling ${modelName}…\n`;
-
-  try {
-    const res = await fetch('/api/models/pull', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ name: modelName }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      box.textContent = `Error: ${err.error || res.statusText}`;
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const text = line.slice(6);
-          if (text && text !== '[DONE]') {
-            box.textContent += text + '\n';
-            box.scrollTop = box.scrollHeight;
-          }
-        }
-      }
-    }
-    showToast(`✅ ${modelName} pulled successfully`, 'ok');
-    loadModels();
-  } catch (e) {
-    box.textContent += `Error: ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Pull';
-  }
-}
-
-/* Global model select change handler */
-$('global-model-select').addEventListener('change', () => {
-  const val = $('global-model-select').value;
-  setActiveModel(val);
-  if (val) showToast(`Active model: ${val}`, 'ok');
-});
-
-$('refresh-models-btn').addEventListener('click', loadModels);
-
-/* Load models on startup to populate selects */
-(async () => {
-  try {
-    const r = await API('/api/models');
-    const data = await r.json();
-    loadAllModelSelects(data);
-  } catch { }
-})();
-
-/* ═══════════════════════════════════════
-   TAB 12 — MONITORING
-═══════════════════════════════════════ */
-$('refresh-stats-btn').addEventListener('click', loadMonitoring);
-
-async function loadMonitoring() {
-  try {
-    const [statsR, reqR, hourR] = await Promise.all([
-      API('/api/monitoring/stats'),
-      API('/api/monitoring/requests?n=30'),
-      API('/api/monitoring/hourly'),
-    ]);
-    const stats = await statsR.json();
-    const { requests } = await reqR.json();
-    const { hourly } = await hourR.json();
-
-    $('stats-grid').innerHTML = [
-      { label: 'Total Requests', value: stats.total_requests },
-      { label: 'Input Tokens', value: (stats.total_input_tokens || 0).toLocaleString() },
-      { label: 'Output Tokens', value: (stats.total_output_tokens || 0).toLocaleString() },
-      { label: 'Cost (USD)', value: `$${(stats.total_cost_usd || 0).toFixed(4)}` },
-      { label: 'Errors', value: stats.errors || 0 },
-    ].map(s => `
-      <div class="stat-card">
-        <div class="stat-value">${escHtml(String(s.value))}</div>
-        <div class="stat-label">${s.label}</div>
-      </div>`).join('');
-
-    $('requests-list').textContent = requests.map(r =>
-      `[${r.ts.slice(11, 19)}] ${r.endpoint} — ${r.input_tokens}↑${r.output_tokens}↓ — $${r.cost_usd} — ${r.latency_ms}ms${r.error ? ' ❌' : ''}`
-    ).join('\n');
-
-    $('hourly-list').textContent = hourly.map(h =>
-      `${h.hour}: ${h.requests} requests | ${h.tokens} tokens | $${h.cost.toFixed(4)}`
-    ).join('\n') || 'No data yet';
-  } catch (e) { $('stats-grid').textContent = `Error: ${e.message}`; }
-}
-
-/* ═══════════════════════════════════════
-   TAB — MULTI-AGENT SYSTEM
-═══════════════════════════════════════ */
-async function loadAgentsGrid() {
-  try {
-    const r = await API('/api/agents');
-    const { agents } = await r.json();
-    $('agents-grid').innerHTML = agents.map(a => `
-      <div class="agent-card">
-        <div class="a-emoji">${a.emoji || '🤖'}</div>
-        <div class="a-name">${escHtml(a.name)}</div>
-        <div class="a-desc">${escHtml(a.description)}</div>
-      </div>`).join('');
-  } catch { }
-}
-
-async function loadAgentHistory() {
-  try {
-    const r = await API('/api/agents/history');
-    const { history } = await r.json();
-    const list = $('agent-history');
-    if (!history.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No team runs yet</p>'; return; }
-    list.innerHTML = history.map(h => `
-      <div class="task-card">
-        <div class="task-head">
-          <span class="task-text">${escHtml(h.task)}</span>
-          <span class="task-time">${h.ts}</span>
-          <span class="badge running">${h.mode}</span>
-        </div>
-        <div style="color:var(--muted);font-size:12px;margin-top:4px">
-          Agents: ${h.agents.join(', ')}
-        </div>
-      </div>`).join('');
-  } catch { }
-}
-
-$('agent-run-btn').addEventListener('click', async () => {
-  const task = $('agent-task-input').value.trim();
-  const mode = $('agent-mode-select').value;
-  if (!task) return showToast('Enter a task', 'err');
-
-  const btn = $('agent-run-btn');
-  const box = $('agent-output');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Team working… <span class="spinner"></span>';
-  box.textContent = '';
-
-  try {
-    const res = await fetch('/api/agents/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ task, mode }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json();
-      box.textContent = `Error: ${err.error || res.statusText}`;
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          const text = line.slice(6).replace(/\\n/g, '\n');
-          box.textContent += text;
-          box.scrollTop = box.scrollHeight;
-        }
-      }
-    }
-    loadAgentHistory();
-    showToast('✅ Team task complete', 'ok');
-  } catch (e) {
-    box.textContent = `Error: ${e.message}`;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '▶ Run Team';
-  }
-});
-
-$('refresh-agent-history-btn').addEventListener('click', loadAgentHistory);
-
-document.querySelector('[data-tab="agents"]').addEventListener('click', () => {
-  loadAgentsGrid();
-  loadAgentHistory();
-});
-
-/* ═══════════════════════════════════════
-   TAB — VOICE
-═══════════════════════════════════════ */
-let voiceAudioBlob = null;
-let voiceMediaRecorder = null;
-let voiceChunks = [];
-
-async function checkVoiceStatus() {
-  try {
-    const r = await API('/api/voice/status');
-    const data = await r.json();
-    $('voice-status').textContent = data.whisper_available
-      ? `✅ Whisper available — models: ${data.models.join(', ')}`
-      : '⚠️ Whisper not installed. Run: pip install openai-whisper';
-  } catch (e) {
-    $('voice-status').textContent = `Status check failed: ${e.message}`;
-  }
-}
-
-const voiceArea = $('voice-upload-area');
-const voiceFileInput = $('voice-file-input');
-voiceArea.addEventListener('click', () => voiceFileInput.click());
-voiceArea.addEventListener('dragover', e => { e.preventDefault(); voiceArea.classList.add('dragover'); });
-voiceArea.addEventListener('dragleave', () => voiceArea.classList.remove('dragover'));
-voiceArea.addEventListener('drop', e => {
-  e.preventDefault();
-  voiceArea.classList.remove('dragover');
-  if (e.dataTransfer.files[0]) {
-    voiceAudioBlob = e.dataTransfer.files[0];
-    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
-  }
-});
-voiceFileInput.addEventListener('change', () => {
-  if (voiceFileInput.files[0]) {
-    voiceAudioBlob = voiceFileInput.files[0];
-    voiceArea.querySelector('span').textContent = `🎵 ${voiceAudioBlob.name}`;
-  }
-});
-
-async function _doTranscribe(runAsTask = false) {
-  if (!voiceAudioBlob) return showToast('Select or record an audio file first', 'err');
-  const box = runAsTask ? $('voice-result') : $('voice-result');
-  box.textContent = 'Transcribing…';
-
-  const fd = new FormData();
-  fd.append('audio', voiceAudioBlob, voiceAudioBlob.name || 'audio.wav');
-  const lang = $('voice-language').value.trim();
-  if (lang) fd.append('language', lang);
-  fd.append('model', $('voice-model-select').value);
-
-  const endpoint = runAsTask ? '/api/voice/transcribe-and-run' : '/api/voice/transcribe';
-  try {
-    const r = await fetch(endpoint, { method: 'POST', body: fd, headers: getAuthHeader() });
-    const data = await r.json();
-    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
-
-    if (runAsTask) {
-      box.textContent = `[Transcription] ${data.transcription?.text || ''}\n\n[Task Output]\n${data.output || ''}`;
-    } else {
-      const segs = (data.segments || []).map(s =>
-        `[${s.start.toFixed(1)}s → ${s.end.toFixed(1)}s] ${s.text}`).join('\n');
-      box.textContent = `Language: ${data.language || 'auto'}\n\n${data.text}\n\n${segs ? 'Segments:\n' + segs : ''}`;
-    }
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-}
-
-$('voice-transcribe-btn').addEventListener('click', () => _doTranscribe(false));
-$('voice-run-btn').addEventListener('click', () => _doTranscribe(true));
-
-// Browser microphone recording
-$('voice-record-btn').addEventListener('click', async () => {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    voiceChunks = [];
-    voiceMediaRecorder = new MediaRecorder(stream);
-    voiceMediaRecorder.ondataavailable = e => voiceChunks.push(e.data);
-    voiceMediaRecorder.onstop = () => {
-      const blob = new Blob(voiceChunks, { type: 'audio/webm' });
-      voiceAudioBlob = new File([blob], 'recording.webm', { type: 'audio/webm' });
-      const url = URL.createObjectURL(blob);
-      const playback = $('voice-playback');
-      playback.src = url;
-      playback.style.display = 'block';
-      $('voice-record-result').textContent = '✅ Recording ready — click Transcribe above';
-      stream.getTracks().forEach(t => t.stop());
-    };
-    voiceMediaRecorder.start();
-    $('voice-record-btn').disabled = true;
-    $('voice-stop-btn').disabled = false;
-    $('voice-record-result').textContent = '⏺ Recording…';
-  } catch (e) {
-    showToast(`Microphone access denied: ${e.message}`, 'err');
-  }
-});
-
-$('voice-stop-btn').addEventListener('click', () => {
-  if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
-    voiceMediaRecorder.stop();
-    $('voice-record-btn').disabled = false;
-    $('voice-stop-btn').disabled = true;
-  }
-});
-
-document.querySelector('[data-tab="voice"]').addEventListener('click', checkVoiceStatus);
-
-/* ═══════════════════════════════════════
-   TAB — AUTOMATION
-═══════════════════════════════════════ */
-$('briefing-btn').addEventListener('click', async () => {
-  const btn = $('briefing-btn');
-  const box = $('briefing-result');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Generating… <span class="spinner"></span>';
-  box.textContent = 'Fetching news and generating briefing…';
-  try {
-    const note = $('briefing-note').value.trim();
-    const r = await APIJ('/api/automation/briefing', { note });
-    const data = await r.json();
-    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
-    box.textContent = `${data.briefing}\n\n[Generated: ${data.generated_at}]`;
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-  finally { btn.disabled = false; btn.textContent = 'Generate Briefing'; }
-});
-
-async function loadResources() {
-  try {
-    const r = await API('/api/system/resources');
-    const d = await r.json();
-
-    const cards = [
-      { label: 'CPU', value: `${d.cpu_percent}%`, warn: d.cpu_percent > 75, err: d.cpu_percent > 90 },
-      { label: 'RAM', value: `${d.memory_percent}%`, warn: d.memory_percent > 75, err: d.memory_percent > 90 },
-      { label: 'Disk', value: `${d.disk_percent}%`, warn: d.disk_percent > 80, err: d.disk_percent > 90 },
-      { label: 'RAM Used', value: `${d.memory_used_gb} GB` },
-      { label: 'Disk Used', value: `${d.disk_used_gb} GB` },
-      { label: 'Net ↑', value: `${d.net_sent_mb} MB` },
-    ];
-
-    $('resources-grid').innerHTML = cards.map(c => `
-      <div class="resource-card${c.err ? ' err' : c.warn ? ' warn' : ''}">
-        <div class="res-value">${c.value}</div>
-        <div class="res-label">${c.label}</div>
-      </div>`).join('');
-
-    $('top-processes').textContent = 'Top processes:\n' +
-      (d.top_processes || []).map(p =>
-        `${p.name.padEnd(18)} CPU: ${String(p.cpu).padStart(5)}%  MEM: ${String(p.mem).padStart(5)}%  PID: ${p.pid}`
-      ).join('\n');
-  } catch (e) { $('resources-grid').textContent = `Error: ${e.message}`; }
-}
-
-async function updateMonitorStatus() {
-  try {
-    const r = await API('/api/system/monitor');
-    const d = await r.json();
-    $('monitor-status').textContent =
-      d.running
-        ? `✅ Monitor running (every ${d.interval_s}s) | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`
-        : `⏹ Monitor stopped | notify-send: ${d.notify_send_available ? '✅' : '❌ not installed'}`;
-  } catch { }
-}
-
-$('refresh-resources-btn').addEventListener('click', loadResources);
-
-$('monitor-start-btn').addEventListener('click', async () => {
-  await APIJ('/api/system/monitor/start', { interval_s: 60 });
-  updateMonitorStatus();
-  showToast('Resource monitor started', 'ok');
-});
-
-$('monitor-stop-btn').addEventListener('click', async () => {
-  await APIJ('/api/system/monitor/stop', {});
-  updateMonitorStatus();
-  showToast('Monitor stopped', 'ok');
-});
-
-async function runMaintenance(dryRun) {
-  const action = $('maintenance-action').value;
-  const box = $('maintenance-result');
-  box.textContent = dryRun ? 'Running dry run…' : 'Running cleanup…';
-  try {
-    const r = await APIJ('/api/automation/maintenance', { action, dry_run: dryRun });
-    const data = await r.json();
-    if (data.error) { box.textContent = `Error: ${data.error}`; return; }
-
-    const lines = [];
-    const addSection = (title, result) => {
-      if (!result) return;
-      lines.push(`── ${title} ──`);
-      if (result.removed_count !== undefined)
-        lines.push(`Removed: ${result.removed_count} items (${result.total_freed_mb} MB freed)`);
-      if (result.root)
-        lines.push(`Disk: ${result.root.used_gb}/${result.root.total_gb} GB (${result.root.percent}%)`);
-      if (result.error) lines.push(`Error: ${result.error}`);
-    };
-
-    if (data.temp_cleanup) addSection('Temp Files', data.temp_cleanup);
-    if (data.log_cleanup) addSection('Old Logs', data.log_cleanup);
-    if (data.disk_report) addSection('Disk Report', data.disk_report);
-    if (data.removed_count !== undefined) addSection(action, data);
-
-    box.textContent = lines.join('\n') || JSON.stringify(data, null, 2);
-    if (!dryRun) showToast('✅ Maintenance complete', 'ok');
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-}
-
-$('maintenance-dry-btn').addEventListener('click', () => runMaintenance(true));
-$('maintenance-run-btn').addEventListener('click', () => runMaintenance(false));
-
-$('notif-send-btn').addEventListener('click', async () => {
-  const title = $('notif-title').value.trim() || 'AI Agent';
-  const body = $('notif-body').value.trim();
-  if (!body) return showToast('Enter notification body', 'err');
-  const urgency = $('notif-urgency').value;
-  try {
-    const r = await APIJ('/api/system/notify', { title, body, urgency });
-    const data = await r.json();
-    $('notif-result').textContent = data.sent
-      ? `✅ Notification sent: "${title}" — ${body}`
-      : `⚠️ notify-send not available (logged instead)`;
-  } catch (e) { $('notif-result').textContent = `Error: ${e.message}`; }
-});
-
-document.querySelector('[data-tab="automation"]').addEventListener('click', () => {
-  loadResources();
-  updateMonitorStatus();
-});
-
-/* ═══════════════════════════════════════
-   TAB — SELF-HEALING SYSTEM
-═══════════════════════════════════════ */
-$('heal-analyze-btn').addEventListener('click', () => runHealAnalysis(false));
-$('heal-auto-btn').addEventListener('click', () => runHealAnalysis(true));
-
-async function runHealAnalysis(autoApply) {
-  const error = $('heal-error').value.trim();
-  if (!error) return showToast('Paste an error traceback first', 'err');
-  const task = $('heal-task').value.trim();
-  const file = $('heal-file').value.trim();
-  const box = $('heal-result');
-  const btn = autoApply ? $('heal-auto-btn') : $('heal-analyze-btn');
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Analyzing… <span class="spinner"></span>';
-  box.textContent = 'Sending error to healer…';
-
-  try {
-    const endpoint = autoApply ? '/api/heal/auto' : '/api/heal/analyze';
-    const r = await APIJ(endpoint, { error, task, file });
-    const data = await r.json();
-
-    if (autoApply) {
-      const patch = data.patch || {};
-      const apply = data.apply_result || {};
-      const healed = data.healed;
-      box.textContent = [
-        `Healed: ${healed ? '✅ YES' : '❌ NO'}`,
-        `Analysis: ${patch.analysis || 'N/A'}`,
-        `Confidence: ${((patch.confidence || 0) * 100).toFixed(0)}%`,
-        `Safe to apply: ${patch.safe_to_apply}`,
-        `File: ${patch.file || 'N/A'}`,
-        apply.applied ? `✅ Patch applied → backup: ${apply.backup}` : `⚠️ Not applied: ${apply.reason || apply.error || 'N/A'}`,
-      ].join('\n');
-      if (healed) showToast('✅ Self-heal applied successfully', 'ok');
-      else showToast('Patch proposed but not applied', 'ok');
-    } else {
-      box.textContent = [
-        `Analysis: ${data.analysis || 'N/A'}`,
-        `Confidence: ${((data.confidence || 0) * 100).toFixed(0)}%`,
-        `Safe to apply: ${data.safe_to_apply}`,
-        `Patch type: ${data.patch_type || 'N/A'}`,
-        `File: ${data.file || 'N/A'}`,
-        `Reasoning: ${data.reasoning || 'N/A'}`,
-        data.old_code ? `\nOLD:\n${data.old_code}` : '',
-        data.new_code ? `\nNEW:\n${data.new_code}` : '',
-      ].filter(Boolean).join('\n');
-
-      if (data.safe_to_apply && data.old_code) {
-        const applyBtn = document.createElement('button');
-        applyBtn.className = 'btn primary';
-        applyBtn.textContent = '✅ Apply This Patch';
-        applyBtn.style.marginTop = '10px';
-        applyBtn.addEventListener('click', async () => {
-          applyBtn.disabled = true;
-          const r2 = await APIJ('/api/heal/apply', { patch: data });
-          const d2 = await r2.json();
-          box.textContent += `\n\nApply result: ${d2.applied ? '✅ Applied' : '❌ ' + (d2.error || d2.reason)}`;
-          if (d2.applied) { loadHealLog(); showToast('✅ Patch applied', 'ok'); }
-        });
-        box.parentNode.insertBefore(applyBtn, box.nextSibling);
-      }
-    }
-    loadHealLog();
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-  finally { btn.disabled = false; btn.innerHTML = btn === $('heal-auto-btn') ? '⚡ Analyze + Auto-Apply' : '🔍 Analyze'; }
-}
-
-async function loadHealLog() {
-  try {
-    const r = await API('/api/heal/log');
-    const { log } = await r.json();
-    const list = $('heal-log');
-    if (!log.length) { list.innerHTML = '<p style="color:var(--muted);font-size:13px">No heals yet</p>'; return; }
-    list.innerHTML = log.map(h => `
-      <div class="heal-card ${h.applied ? '' : 'failed'}">
-        <div class="heal-file">${escHtml(h.file || 'unknown file')}</div>
-        <div class="heal-analysis">${escHtml(h.analysis || h.patch_summary || '')}</div>
-        <div class="heal-meta">
-          ${h.ts || ''} | confidence: ${((h.confidence || 0) * 100).toFixed(0)}%
-          ${h.backup ? ` | <a href="#" class="link" onclick="restoreBackup('${escHtml(h.backup)}');return false">↩ Restore</a>` : ''}
-        </div>
-      </div>`).join('');
-  } catch { }
-}
-
-async function restoreBackup(path) {
-  if (!confirm(`Restore from backup?\n${path}`)) return;
-  const r = await APIJ('/api/heal/restore', { backup_path: path });
-  const data = await r.json();
-  showToast(data.restored ? '✅ Restored' : '❌ Restore failed', data.restored ? 'ok' : 'err');
-}
-
-$('refresh-heal-log-btn').addEventListener('click', loadHealLog);
-$('refresh-backups-btn').addEventListener('click', async () => {
-  const r = await API('/api/heal/backups');
-  const { backups } = await r.json();
-  $('heal-log').innerHTML = backups.length
-    ? backups.map(b => `<div class="heal-card"><div class="heal-file">${escHtml(b.name)}</div><div class="heal-meta">${b.ts} | ${(b.size/1024).toFixed(1)} KB | <a href="#" class="link" onclick="restoreBackup('${escHtml(b.path)}');return false">↩ Restore</a></div></div>`).join('')
-    : '<p style="color:var(--muted);font-size:13px">No backups</p>';
-});
-
-document.querySelector('[data-tab="healer"]').addEventListener('click', loadHealLog);
-
-/* ═══════════════════════════════════════
-   TAB — DIGITAL TWIN
-═══════════════════════════════════════ */
-let _currentProbeQuestion = '';
-
-$('twin-name-btn').addEventListener('click', async () => {
-  const name = $('twin-name').value.trim();
-  if (!name) return showToast('Enter your name', 'err');
-  await APIJ('/api/twin/name', { name });
-  showToast(`Twin personalized for: ${name}`, 'ok');
-});
-
-$('twin-profile-btn').addEventListener('click', async () => {
-  const box = $('twin-summary');
-  box.textContent = 'Loading profile…';
-  try {
-    const r = await API('/api/twin/profile');
-    const data = await r.json();
-    const profile = data.profile;
-    const summary = data.summary;
-    box.textContent = summary + (Object.keys(profile).length
-      ? '\n\n── Profile fields ──\n' + Object.entries(profile).map(([k,v]) => `${k}: ${JSON.stringify(v).slice(0,80)}`).join('\n')
-      : '\n\n(Profile empty — ingest some files to train the twin)');
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-// File ingestion
-const twinArea = $('twin-upload-area');
-const twinFileInput = $('twin-file-input');
-twinArea.addEventListener('click', () => twinFileInput.click());
-twinArea.addEventListener('dragover', e => { e.preventDefault(); twinArea.classList.add('dragover'); });
-twinArea.addEventListener('dragleave', () => twinArea.classList.remove('dragover'));
-twinArea.addEventListener('drop', async e => {
-  e.preventDefault(); twinArea.classList.remove('dragover');
-  if (e.dataTransfer.files.length) await ingestTwinFiles(e.dataTransfer.files);
-});
-twinFileInput.addEventListener('change', async () => { if (twinFileInput.files.length) await ingestTwinFiles(twinFileInput.files); });
-
-$('twin-ingest-file-btn').addEventListener('click', async () => {
-  if (twinFileInput.files.length) await ingestTwinFiles(twinFileInput.files);
-  else twinFileInput.click();
-});
-
-async function ingestTwinFiles(files) {
-  const box = $('twin-ingest-result');
-  box.textContent = `Ingesting ${files.length} file(s)…`;
-  let results = [];
-  for (const f of files) {
-    const fd = new FormData();
-    fd.append('file', f);
-    try {
-      const r = await fetch('/api/twin/ingest/file', { method: 'POST', body: fd, headers: getAuthHeader() });
-      const data = await r.json();
-      results.push(`${f.name}: ${data.ok ? '✅' : '❌ ' + data.error}`);
-    } catch (e) { results.push(`${f.name}: ❌ ${e.message}`); }
-  }
-  box.textContent = results.join('\n');
-  showToast(`Twin trained on ${files.length} file(s)`, 'ok');
-}
-
-$('twin-ingest-dir-btn').addEventListener('click', async () => {
-  const path = $('twin-dir').value.trim();
-  if (!path) return showToast('Enter a directory path', 'err');
-  const box = $('twin-ingest-result');
-  box.textContent = `Ingesting directory: ${path}…`;
-  try {
-    const r = await APIJ('/api/twin/ingest/directory', { path });
-    const data = await r.json();
-    box.textContent = data.error
-      ? `Error: ${data.error}`
-      : `✅ Ingested ${data.ingested} files from ${path}`;
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-// Ask the twin (streaming)
-$('twin-ask-btn').addEventListener('click', async () => {
-  const question = $('twin-question').value.trim();
-  if (!question) return showToast('Enter a question', 'err');
-  const box = $('twin-answer');
-  box.textContent = 'Your twin is thinking…';
-  $('twin-ask-btn').disabled = true;
-
-  try {
-    const res = await fetch('/api/twin/ask/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-      body: JSON.stringify({ question }),
-    });
-    box.textContent = '';
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value);
-      for (const line of chunk.split('\n')) {
-        if (line.startsWith('data: ')) {
-          box.textContent += line.slice(6);
-          box.scrollTop = box.scrollHeight;
-        }
-      }
-    }
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-  finally { $('twin-ask-btn').disabled = false; $('twin-ask-btn').textContent = 'Ask Twin'; }
-});
-
-// Probing session
-$('twin-probe-btn').addEventListener('click', async () => {
-  const box = $('twin-probe-question');
-  box.textContent = 'Generating question…';
-  try {
-    const r = await API('/api/twin/probe');
-    const data = await r.json();
-    _currentProbeQuestion = data.question;
-    box.textContent = data.question;
-  } catch (e) { box.textContent = `Error: ${e.message}`; }
-});
-
-$('twin-probe-submit-btn').addEventListener('click', async () => {
-  const answer = $('twin-probe-answer').value.trim();
-  if (!answer || !_currentProbeQuestion) return showToast('Generate a question and write your answer first', 'err');
-  try {
-    await APIJ('/api/twin/probe/answer', { question: _currentProbeQuestion, answer });
-    $('twin-probe-result').textContent = '✅ Answer recorded — twin profile updated';
-    $('twin-probe-answer').value = '';
-    showToast('Twin learned from your answer', 'ok');
-  } catch (e) { $('twin-probe-result').textContent = `Error: ${e.message}`; }
 });
