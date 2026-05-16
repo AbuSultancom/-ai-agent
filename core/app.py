@@ -1293,5 +1293,52 @@ def twin_log():
     return jsonify({"log": get_twin().get_ingestion_log()})
 
 
+# ── Unified Chat (single interface with tool use + streaming) ─────────────────
+
+@app.route("/api/unified/stream", methods=["POST"])
+def unified_stream():
+    """SSE stream: routes through orchestrator, emits typed events for text + tool calls."""
+    import re
+    from flask import stream_with_context
+
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    history = data.get("history", [])   # [{role, content}, ...]
+    model = data.get("model") or config.MODEL
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    _tool_re = re.compile(r'^\s*\*\*\[(\w+)\]\*\*\s*`(.*?)`\s*$', re.DOTALL)
+
+    def generate():
+        from core.orchestrator import AIOrchestrator
+        orch = AIOrchestrator()
+        messages = list(history) + [{"role": "user", "content": message}]
+
+        text_buf = ""
+        for chunk in orch.run_with_messages(messages, model=model):
+            m = _tool_re.match(chunk.strip())
+            if m:
+                if text_buf.strip():
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+                yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
+            else:
+                text_buf += chunk
+                if len(text_buf) >= 40:
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+
+        if text_buf.strip():
+            yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)

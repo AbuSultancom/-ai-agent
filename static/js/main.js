@@ -23,6 +23,8 @@ function setActiveModel(model) {
   if (gSel && model) gSel.value = model;
   const cSel = $('chat-model-select');
   if (cSel && model) cSel.value = model;
+  const badge = $('unified-model-badge');
+  if (badge) badge.textContent = model || 'default model';
 }
 
 function timeAgo(iso) {
@@ -75,6 +77,180 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab === 'monitoring') loadMonitoring();
   });
 });
+
+/* ═══════════════════════════════════════
+   UNIFIED CHAT
+═══════════════════════════════════════ */
+let unifiedHistory = [];
+let unifiedStreaming = false;
+
+function chipSend(text) {
+  $('unified-input').value = text;
+  sendUnifiedMessage();
+}
+
+function newChat() {
+  unifiedHistory = [];
+  const msgs = $('unified-messages');
+  msgs.innerHTML = '';
+  const welcome = document.createElement('div');
+  welcome.id = 'unified-welcome';
+  welcome.className = 'unified-welcome';
+  welcome.innerHTML = `
+    <div class="welcome-icon">🤖</div>
+    <h2>AI Agent</h2>
+    <p>Ask anything or give a task — I'll use tools when needed.</p>
+    <div class="chip-row">
+      <button class="chip" onclick="chipSend('List Python files in the current directory')">📁 List files</button>
+      <button class="chip" onclick="chipSend('Write a Hello World Python script and save it to /tmp/hello.py')">🐍 Python script</button>
+      <button class="chip" onclick="chipSend('What tools do you have available?')">🛠️ Show tools</button>
+      <button class="chip" onclick="chipSend('Search for files matching *.py in the current directory')">🔍 Search files</button>
+    </div>`;
+  msgs.appendChild(welcome);
+}
+
+function appendUserBubble(text) {
+  const welcome = $('unified-welcome');
+  if (welcome) welcome.remove();
+  const row = document.createElement('div');
+  row.className = 'umsg-row user';
+  row.innerHTML = `<div class="umsg-avatar">👤</div><div class="umsg-content">${escHtml(text).replace(/\n/g, '<br>')}</div>`;
+  $('unified-messages').appendChild(row);
+  scrollUnified();
+}
+
+function appendAssistantBubble() {
+  const row = document.createElement('div');
+  row.className = 'umsg-row assistant';
+  const avatar = document.createElement('div');
+  avatar.className = 'umsg-avatar';
+  avatar.textContent = '🤖';
+  const content = document.createElement('div');
+  content.className = 'umsg-content';
+  content.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
+  row.appendChild(avatar);
+  row.appendChild(content);
+  $('unified-messages').appendChild(row);
+  scrollUnified();
+  return { row, content };
+}
+
+function appendToolCard(parentEl, name, args) {
+  const card = document.createElement('div');
+  card.className = 'tool-card';
+  card.innerHTML = `
+    <div class="tool-card-head" onclick="this.parentElement.classList.toggle('open')">
+      <span>⚙️</span>
+      <span class="tool-name">${escHtml(name)}</span>
+      <span class="tool-args">${escHtml(args)}</span>
+      <span class="tool-chevron">▶</span>
+    </div>
+    <div class="tool-body">
+      <div style="color:var(--muted);font-size:12px;margin-bottom:4px">Arguments:</div>
+      <pre>${escHtml(args)}</pre>
+      <div class="tool-result-label">Result:</div>
+      <pre class="tool-result">…</pre>
+    </div>`;
+  parentEl.appendChild(card);
+  scrollUnified();
+  return card;
+}
+
+function scrollUnified() {
+  const msgs = $('unified-messages');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+async function sendUnifiedMessage() {
+  const input = $('unified-input');
+  const text = input.value.trim();
+  if (!text || unifiedStreaming) return;
+  input.value = '';
+  input.style.height = 'auto';
+  unifiedStreaming = true;
+  $('unified-send-btn').disabled = true;
+
+  appendUserBubble(text);
+  unifiedHistory.push({ role: 'user', content: text });
+
+  const { row, content } = appendAssistantBubble();
+  let textAccum = '';
+
+  try {
+    const model = getActiveModel();
+    const res = await fetch('/api/unified/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+      body: JSON.stringify({ message: text, history: unifiedHistory.slice(-20), model: model || undefined }),
+    });
+
+    if (!res.ok) {
+      content.textContent = `Error: ${res.statusText}`;
+      return;
+    }
+
+    content.innerHTML = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let textEl = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value);
+      for (const line of chunk.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') break;
+        try {
+          const evt = JSON.parse(payload);
+          if (evt.type === 'text') {
+            textAccum += evt.content;
+            if (!textEl) {
+              textEl = document.createElement('div');
+              content.appendChild(textEl);
+            }
+            textEl.innerHTML = renderMarkdown(escHtml(textAccum));
+          } else if (evt.type === 'tool') {
+            textEl = null;
+            appendToolCard(content, evt.name, evt.args);
+          }
+          scrollUnified();
+        } catch {}
+      }
+    }
+
+    unifiedHistory.push({ role: 'assistant', content: textAccum || '(no response)' });
+  } catch (err) {
+    content.innerHTML = `<span style="color:var(--err)">Error: ${escHtml(err.message)}</span>`;
+  } finally {
+    unifiedStreaming = false;
+    $('unified-send-btn').disabled = false;
+  }
+}
+
+$('unified-send-btn').addEventListener('click', sendUnifiedMessage);
+$('unified-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUnifiedMessage(); }
+});
+$('unified-input').addEventListener('input', function () {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+});
+$('new-chat-btn').addEventListener('click', newChat);
+
+/* ───────── Sidebar toggle ───────── */
+$('sidebar-toggle').addEventListener('click', () => {
+  $('sidebar').classList.toggle('collapsed');
+});
+
+/* ───────── Model badge ───────── */
+function updateModelBadge() {
+  const model = getActiveModel();
+  const badge = $('unified-model-badge');
+  if (badge) badge.textContent = model || 'default model';
+}
+updateModelBadge();
 
 /* ═══════════════════════════════════════
    TAB 1 — TASKS

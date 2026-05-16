@@ -3,499 +3,546 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Agent Dashboard</title>
+  <title>AI Agent</title>
   <link rel="stylesheet" href="/static/css/main.css" />
 </head>
 <body>
-  <nav class="navbar">
-    <div class="nav-brand">🤖 AI Agent</div>
-    <div class="nav-tabs">
-      <button class="tab-btn active" data-tab="tasks">Tasks</button>
-      <button class="tab-btn" data-tab="chat">Chat</button>
-      <button class="tab-btn" data-tab="memory">Memory</button>
-      <button class="tab-btn" data-tab="rag">Documents</button>
-      <button class="tab-btn" data-tab="vision">Vision</button>
-      <button class="tab-btn" data-tab="data">Data</button>
-      <button class="tab-btn" data-tab="personas">Personas</button>
-      <button class="tab-btn" data-tab="templates">Templates</button>
-      <button class="tab-btn" data-tab="batch">Batch</button>
-      <button class="tab-btn" data-tab="scheduler">Scheduler</button>
-      <button class="tab-btn" data-tab="models">Models</button>
-      <button class="tab-btn" data-tab="monitoring">Monitoring</button>
+<div class="app-layout">
+
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">☰</button>
+      <span class="sidebar-brand">🤖 AI Agent</span>
+    </div>
+
+    <button class="new-chat-btn" id="new-chat-btn">＋ New Chat</button>
+
+    <nav class="sidebar-nav">
+      <button class="tab-btn active" data-tab="unified">💬 Chat</button>
+
+      <div class="sidebar-sep">Features</div>
+      <button class="tab-btn" data-tab="memory">🧠 Memory</button>
+      <button class="tab-btn" data-tab="rag">📄 Documents</button>
+      <button class="tab-btn" data-tab="models">🤖 Models</button>
+      <button class="tab-btn" data-tab="vision">👁 Vision</button>
+      <button class="tab-btn" data-tab="data">📊 Data</button>
       <button class="tab-btn" data-tab="agents">🤝 Agents</button>
+      <button class="tab-btn" data-tab="personas">🎭 Personas</button>
+
+      <div class="sidebar-sep">Tools</div>
+      <button class="tab-btn" data-tab="tasks">⚙️ Tasks</button>
+      <button class="tab-btn" data-tab="chat">💬 Chat (classic)</button>
+      <button class="tab-btn" data-tab="templates">📝 Templates</button>
+      <button class="tab-btn" data-tab="batch">⚡ Batch</button>
+      <button class="tab-btn" data-tab="scheduler">🗓 Scheduler</button>
       <button class="tab-btn" data-tab="voice">🎙️ Voice</button>
+
+      <div class="sidebar-sep">System</div>
+      <button class="tab-btn" data-tab="monitoring">📈 Monitoring</button>
       <button class="tab-btn" data-tab="automation">⚙️ Automation</button>
       <button class="tab-btn" data-tab="healer">🔧 Self-Heal</button>
       <button class="tab-btn" data-tab="twin">🪞 Twin</button>
-    </div>
-    <div class="nav-right">
+    </nav>
+
+    <div class="sidebar-footer">
       <select id="global-model-select" title="Active model"></select>
       <div id="health-dot" class="health-dot" title="Server status"></div>
     </div>
-  </nav>
+  </aside>
 
-  <!-- TASKS TAB -->
-  <section id="tab-tasks" class="tab-content active">
-    <div class="panel">
-      <h2>Run a Task</h2>
-      <textarea id="task-input" placeholder="Describe your task… e.g. Write a Python script that counts words in a file" rows="4"></textarea>
-      <div class="btn-row">
-        <button id="run-task-btn" class="btn primary">▶ Run</button>
-        <button id="clear-output-btn" class="btn secondary">Clear</button>
-      </div>
-      <div id="task-output" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>Recent Tasks</h2>
-      <button id="refresh-tasks-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="tasks-list" class="tasks-list"></div>
-    </div>
-  </section>
+  <!-- ── Main content ── -->
+  <div class="app-content" id="app-content">
 
-  <!-- CHAT TAB -->
-  <section id="tab-chat" class="tab-content">
-    <div class="panel chat-panel">
-      <div class="chat-top-row">
-        <div class="chat-persona-row">
-          <label>Persona:</label>
-          <select id="persona-select">
-            <option value="default">🤖 AI Agent</option>
-            <option value="developer">👨‍💻 Senior Developer</option>
-            <option value="analyst">📊 Data Analyst</option>
-            <option value="writer">✍️ Creative Writer</option>
-            <option value="researcher">🔍 Research Analyst</option>
-            <option value="tutor">🎓 Personal Tutor</option>
-            <option value="security">🔒 Security Expert</option>
-            <option value="translator">🌐 Translator</option>
-          </select>
-        </div>
-        <div class="chat-model-row">
-          <label>Model:</label>
-          <select id="chat-model-select">
-            <option value="">Default (config)</option>
-          </select>
+    <!-- UNIFIED CHAT (default) -->
+    <section id="tab-unified" class="tab-content unified-view active">
+      <div id="unified-messages" class="unified-messages">
+        <div id="unified-welcome" class="unified-welcome">
+          <div class="welcome-icon">🤖</div>
+          <h2>AI Agent</h2>
+          <p>Ask anything or give a task — I'll use tools when needed.</p>
+          <div class="chip-row">
+            <button class="chip" onclick="chipSend('List Python files in the current directory')">📁 List files</button>
+            <button class="chip" onclick="chipSend('Write a Hello World Python script and save it to /tmp/hello.py')">🐍 Python script</button>
+            <button class="chip" onclick="chipSend('What tools do you have available?')">🛠️ Show tools</button>
+            <button class="chip" onclick="chipSend('Search for files matching *.py in the current directory')">🔍 Search files</button>
+          </div>
         </div>
       </div>
-      <div id="chat-messages" class="chat-messages"></div>
-      <div class="chat-input-row">
-        <input id="chat-input" type="text" placeholder="Type your message…" />
-        <button id="chat-send-btn" class="btn primary">Send</button>
-        <button id="chat-clear-btn" class="btn secondary">Clear</button>
+      <div class="unified-input-area">
+        <div class="unified-input-box">
+          <textarea id="unified-input" placeholder="Ask anything or give a task…" rows="1"></textarea>
+          <button id="unified-send-btn" title="Send (Enter)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg>
+          </button>
+        </div>
+        <div class="unified-hints">
+          <span>Enter to send · Shift+Enter for new line</span>
+          <span id="unified-model-badge" class="model-badge"></span>
+        </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- MEMORY TAB -->
-  <section id="tab-memory" class="tab-content">
-    <div class="panel">
-      <h2>Search Memory</h2>
-      <div class="input-row">
-        <input id="memory-query" type="text" placeholder="Search stored memories…" />
-        <button id="memory-search-btn" class="btn primary">Search</button>
+    <!-- TASKS TAB -->
+    <section id="tab-tasks" class="tab-content">
+      <div class="panel">
+        <h2>Run a Task</h2>
+        <textarea id="task-input" placeholder="Describe your task… e.g. Write a Python script that counts words in a file" rows="4"></textarea>
+        <div class="btn-row">
+          <button id="run-task-btn" class="btn primary">▶ Run</button>
+          <button id="clear-output-btn" class="btn secondary">Clear</button>
+        </div>
+        <div id="task-output" class="output-box"></div>
       </div>
-      <div id="memory-results" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>Store a Memory</h2>
-      <input id="memory-key" type="text" placeholder="Key (unique identifier)" />
-      <textarea id="memory-content" placeholder="Content to store" rows="3"></textarea>
-      <button id="memory-store-btn" class="btn primary">Save</button>
-      <div id="memory-store-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>Recent Tasks</h2>
+        <button id="refresh-tasks-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="tasks-list" class="tasks-list"></div>
+      </div>
+    </section>
 
-  <!-- RAG TAB -->
-  <section id="tab-rag" class="tab-content">
-    <div class="panel">
-      <h2>Upload Document</h2>
-      <div class="upload-area" id="upload-area">
-        <span>Drag a file here or <label for="file-input" class="link">browse</label></span>
-        <input id="file-input" type="file" accept=".txt,.pdf,.md,.py,.js,.json,.csv" style="display:none" />
+    <!-- CHAT TAB (classic) -->
+    <section id="tab-chat" class="tab-content">
+      <div class="panel chat-panel">
+        <div class="chat-top-row">
+          <div class="chat-persona-row">
+            <label>Persona:</label>
+            <select id="persona-select">
+              <option value="default">🤖 AI Agent</option>
+              <option value="developer">👨‍💻 Senior Developer</option>
+              <option value="analyst">📊 Data Analyst</option>
+              <option value="writer">✍️ Creative Writer</option>
+              <option value="researcher">🔍 Research Analyst</option>
+              <option value="tutor">🎓 Personal Tutor</option>
+              <option value="security">🔒 Security Expert</option>
+              <option value="translator">🌐 Translator</option>
+            </select>
+          </div>
+          <div class="chat-model-row">
+            <label>Model:</label>
+            <select id="chat-model-select">
+              <option value="">Default (config)</option>
+            </select>
+          </div>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Type your message…" />
+          <button id="chat-send-btn" class="btn primary">Send</button>
+          <button id="chat-clear-btn" class="btn secondary">Clear</button>
+        </div>
       </div>
-      <div id="upload-result" class="output-box" style="min-height:40px"></div>
-    </div>
-    <div class="panel">
-      <h2>Ask a Question</h2>
-      <div class="input-row">
-        <input id="rag-query" type="text" placeholder="Ask about your documents…" />
-        <button id="rag-ask-btn" class="btn primary">Ask</button>
-      </div>
-      <div id="rag-answer" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>Uploaded Documents</h2>
-      <button id="refresh-docs-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="docs-list" class="tasks-list"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- VISION TAB -->
-  <section id="tab-vision" class="tab-content">
-    <div class="panel">
-      <h2>🖼️ Image Analysis</h2>
-      <div class="upload-area" id="vision-upload-area">
-        <span>Drag an image here or <label for="vision-file-input" class="link">browse</label></span>
-        <input id="vision-file-input" type="file" accept="image/*" style="display:none" />
+    <!-- MEMORY TAB -->
+    <section id="tab-memory" class="tab-content">
+      <div class="panel">
+        <h2>Search Memory</h2>
+        <div class="input-row">
+          <input id="memory-query" type="text" placeholder="Search stored memories…" />
+          <button id="memory-search-btn" class="btn primary">Search</button>
+        </div>
+        <div id="memory-results" class="output-box"></div>
       </div>
-      <img id="vision-preview" class="image-preview" style="display:none" alt="preview" />
-      <input id="vision-question" type="text" placeholder="Ask a question about the image (optional)…" />
-      <div class="btn-row">
-        <button id="vision-analyze-btn" class="btn primary">Analyze</button>
-        <button id="vision-ocr-btn" class="btn secondary">Extract Text (OCR)</button>
+      <div class="panel">
+        <h2>Store a Memory</h2>
+        <input id="memory-key" type="text" placeholder="Key (unique identifier)" />
+        <textarea id="memory-content" placeholder="Content to store" rows="3"></textarea>
+        <button id="memory-store-btn" class="btn primary">Save</button>
+        <div id="memory-store-result" class="output-box" style="min-height:40px"></div>
       </div>
-      <div id="vision-result" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>🔗 Analyze from URL</h2>
-      <div class="input-row">
-        <input id="vision-url" type="text" placeholder="Image URL…" />
-        <input id="vision-url-question" type="text" placeholder="Question (optional)" />
-        <button id="vision-url-btn" class="btn primary">Analyze</button>
-      </div>
-      <div id="vision-url-result" class="output-box"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- DATA ANALYSIS TAB -->
-  <section id="tab-data" class="tab-content">
-    <div class="panel">
-      <h2>📊 Data Analysis</h2>
-      <div class="upload-area" id="data-upload-area">
-        <span>Drag a CSV or Excel file here or <label for="data-file-input" class="link">browse</label></span>
-        <input id="data-file-input" type="file" accept=".csv,.xlsx,.xls" style="display:none" />
+    <!-- RAG TAB -->
+    <section id="tab-rag" class="tab-content">
+      <div class="panel">
+        <h2>Upload Document</h2>
+        <div class="upload-area" id="upload-area">
+          <span>Drag a file here or <label for="file-input" class="link">browse</label></span>
+          <input id="file-input" type="file" accept=".txt,.pdf,.md,.py,.js,.json,.csv" style="display:none" />
+        </div>
+        <div id="upload-result" class="output-box" style="min-height:40px"></div>
       </div>
-      <input id="data-question" type="text" placeholder="Analysis question (optional)…" />
-      <div class="btn-row">
-        <button id="data-analyze-btn" class="btn primary">Analyze with AI</button>
-        <button id="data-summary-btn" class="btn secondary">Summary Only</button>
+      <div class="panel">
+        <h2>Ask a Question</h2>
+        <div class="input-row">
+          <input id="rag-query" type="text" placeholder="Ask about your documents…" />
+          <button id="rag-ask-btn" class="btn primary">Ask</button>
+        </div>
+        <div id="rag-answer" class="output-box"></div>
       </div>
-      <div id="data-result" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>📈 Generate Chart</h2>
-      <p class="hint">Upload a file above, then choose a chart type below.</p>
-      <div class="input-row">
-        <select id="chart-type">
-          <option value="auto">Auto-detect</option>
-          <option value="bar">Bar Chart</option>
-          <option value="line">Line Chart</option>
-          <option value="pie">Pie Chart</option>
-          <option value="scatter">Scatter Plot</option>
-        </select>
-        <input id="chart-x" type="text" placeholder="X column (optional)" />
-        <input id="chart-y" type="text" placeholder="Y column (optional)" />
-        <button id="chart-btn" class="btn primary">Generate</button>
+      <div class="panel">
+        <h2>Uploaded Documents</h2>
+        <button id="refresh-docs-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="docs-list" class="tasks-list"></div>
       </div>
-      <div id="chart-result"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- PERSONAS TAB -->
-  <section id="tab-personas" class="tab-content">
-    <div class="panel">
-      <h2>🎭 Available Personas</h2>
-      <button id="refresh-personas-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="personas-list" class="personas-grid"></div>
-    </div>
-    <div class="panel">
-      <h2>➕ Create Custom Persona</h2>
-      <div class="form-grid">
-        <input id="persona-id" type="text" placeholder="ID (lowercase, no spaces)" />
-        <input id="persona-name" type="text" placeholder="Display name" />
-        <input id="persona-emoji" type="text" placeholder="Emoji 🤖" maxlength="4" />
-        <input id="persona-desc" type="text" placeholder="Short description" />
-        <textarea id="persona-system" placeholder="System prompt — define the AI personality" rows="4"></textarea>
-        <button id="persona-create-btn" class="btn primary">Create Persona</button>
+    <!-- VISION TAB -->
+    <section id="tab-vision" class="tab-content">
+      <div class="panel">
+        <h2>🖼️ Image Analysis</h2>
+        <div class="upload-area" id="vision-upload-area">
+          <span>Drag an image here or <label for="vision-file-input" class="link">browse</label></span>
+          <input id="vision-file-input" type="file" accept="image/*" style="display:none" />
+        </div>
+        <img id="vision-preview" class="image-preview" style="display:none" alt="preview" />
+        <input id="vision-question" type="text" placeholder="Ask a question about the image (optional)…" />
+        <div class="btn-row">
+          <button id="vision-analyze-btn" class="btn primary">Analyze</button>
+          <button id="vision-ocr-btn" class="btn secondary">Extract Text (OCR)</button>
+        </div>
+        <div id="vision-result" class="output-box"></div>
       </div>
-      <div id="persona-create-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>🔗 Analyze from URL</h2>
+        <div class="input-row">
+          <input id="vision-url" type="text" placeholder="Image URL…" />
+          <input id="vision-url-question" type="text" placeholder="Question (optional)" />
+          <button id="vision-url-btn" class="btn primary">Analyze</button>
+        </div>
+        <div id="vision-url-result" class="output-box"></div>
+      </div>
+    </section>
 
-  <!-- PROMPT TEMPLATES TAB -->
-  <section id="tab-templates" class="tab-content">
-    <div class="panel">
-      <h2>📝 Prompt Templates</h2>
-      <button id="refresh-templates-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="templates-list" class="templates-list"></div>
-    </div>
-    <div class="panel">
-      <h2>▶ Run a Template</h2>
-      <select id="template-select"><option value="">— Select a template —</option></select>
-      <div id="template-vars-form" class="form-grid"></div>
-      <div class="btn-row">
-        <button id="template-run-btn" class="btn primary">Run</button>
-        <button id="template-preview-btn" class="btn secondary">Preview</button>
+    <!-- DATA ANALYSIS TAB -->
+    <section id="tab-data" class="tab-content">
+      <div class="panel">
+        <h2>📊 Data Analysis</h2>
+        <div class="upload-area" id="data-upload-area">
+          <span>Drag a CSV or Excel file here or <label for="data-file-input" class="link">browse</label></span>
+          <input id="data-file-input" type="file" accept=".csv,.xlsx,.xls" style="display:none" />
+        </div>
+        <input id="data-question" type="text" placeholder="Analysis question (optional)…" />
+        <div class="btn-row">
+          <button id="data-analyze-btn" class="btn primary">Analyze with AI</button>
+          <button id="data-summary-btn" class="btn secondary">Summary Only</button>
+        </div>
+        <div id="data-result" class="output-box"></div>
       </div>
-      <div id="template-result" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>➕ Create New Template</h2>
-      <input id="new-tmpl-name" type="text" placeholder="Template name" />
-      <input id="new-tmpl-desc" type="text" placeholder="Description" />
-      <textarea id="new-tmpl-text" placeholder="Template body — use {{variable}} for placeholders" rows="5"></textarea>
-      <button id="new-tmpl-btn" class="btn primary">Save Template</button>
-      <div id="new-tmpl-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>📈 Generate Chart</h2>
+        <p class="hint">Upload a file above, then choose a chart type below.</p>
+        <div class="input-row">
+          <select id="chart-type">
+            <option value="auto">Auto-detect</option>
+            <option value="bar">Bar Chart</option>
+            <option value="line">Line Chart</option>
+            <option value="pie">Pie Chart</option>
+            <option value="scatter">Scatter Plot</option>
+          </select>
+          <input id="chart-x" type="text" placeholder="X column (optional)" />
+          <input id="chart-y" type="text" placeholder="Y column (optional)" />
+          <button id="chart-btn" class="btn primary">Generate</button>
+        </div>
+        <div id="chart-result"></div>
+      </div>
+    </section>
 
-  <!-- BATCH TASKS TAB -->
-  <section id="tab-batch" class="tab-content">
-    <div class="panel">
-      <h2>⚡ Batch Tasks</h2>
-      <p class="hint">Enter one task per line — all will run in parallel.</p>
-      <textarea id="batch-input" placeholder="First task&#10;Second task&#10;Third task…" rows="6"></textarea>
-      <div class="btn-row">
-        <button id="batch-run-btn" class="btn primary">▶ Run All</button>
+    <!-- PERSONAS TAB -->
+    <section id="tab-personas" class="tab-content">
+      <div class="panel">
+        <h2>🎭 Available Personas</h2>
+        <button id="refresh-personas-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="personas-list" class="personas-grid"></div>
       </div>
-      <div id="batch-result" class="output-box"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>➕ Create Custom Persona</h2>
+        <div class="form-grid">
+          <input id="persona-id" type="text" placeholder="ID (lowercase, no spaces)" />
+          <input id="persona-name" type="text" placeholder="Display name" />
+          <input id="persona-emoji" type="text" placeholder="Emoji 🤖" maxlength="4" />
+          <input id="persona-desc" type="text" placeholder="Short description" />
+          <textarea id="persona-system" placeholder="System prompt — define the AI personality" rows="4"></textarea>
+          <button id="persona-create-btn" class="btn primary">Create Persona</button>
+        </div>
+        <div id="persona-create-result" class="output-box" style="min-height:40px"></div>
+      </div>
+    </section>
 
-  <!-- SCHEDULER TAB -->
-  <section id="tab-scheduler" class="tab-content">
-    <div class="panel">
-      <h2>Add Scheduled Task</h2>
-      <input id="sched-name" type="text" placeholder="Job name" />
-      <textarea id="sched-task" placeholder="Task description" rows="3"></textarea>
-      <div class="input-row">
-        <input id="sched-cron" type="text" placeholder="Cron expression (e.g. 0 8 * * *)" />
-        <button id="sched-add-btn" class="btn primary">Add Job</button>
+    <!-- PROMPT TEMPLATES TAB -->
+    <section id="tab-templates" class="tab-content">
+      <div class="panel">
+        <h2>📝 Prompt Templates</h2>
+        <button id="refresh-templates-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="templates-list" class="templates-list"></div>
       </div>
-      <div id="sched-result" class="output-box" style="min-height:40px"></div>
-    </div>
-    <div class="panel">
-      <h2>Scheduled Jobs</h2>
-      <button id="refresh-sched-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="sched-list" class="tasks-list"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>▶ Run a Template</h2>
+        <select id="template-select"><option value="">— Select a template —</option></select>
+        <div id="template-vars-form" class="form-grid"></div>
+        <div class="btn-row">
+          <button id="template-run-btn" class="btn primary">Run</button>
+          <button id="template-preview-btn" class="btn secondary">Preview</button>
+        </div>
+        <div id="template-result" class="output-box"></div>
+      </div>
+      <div class="panel">
+        <h2>➕ Create New Template</h2>
+        <input id="new-tmpl-name" type="text" placeholder="Template name" />
+        <input id="new-tmpl-desc" type="text" placeholder="Description" />
+        <textarea id="new-tmpl-text" placeholder="Template body — use {{variable}} for placeholders" rows="5"></textarea>
+        <button id="new-tmpl-btn" class="btn primary">Save Template</button>
+        <div id="new-tmpl-result" class="output-box" style="min-height:40px"></div>
+      </div>
+    </section>
 
-  <!-- MODELS TAB -->
-  <section id="tab-models" class="tab-content">
-    <div class="panel">
-      <h2>🧠 Available Models</h2>
-      <button id="refresh-models-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="models-status" class="hint"></div>
-      <div id="models-grid" class="models-grid"></div>
-    </div>
-    <div class="panel">
-      <h2>⬇️ Pull a Local Model</h2>
-      <p class="hint">Requires <a href="https://ollama.com" target="_blank" class="link">Ollama</a> running locally.</p>
-      <div class="input-row">
-        <select id="pull-model-select">
-          <option value="llama3.2">llama3.2 (3B — fast)</option>
-          <option value="llama3.1">llama3.1 (8B)</option>
-          <option value="mistral">mistral (7B)</option>
-          <option value="mixtral">mixtral (47B MoE)</option>
-          <option value="qwen2.5">qwen2.5 (7B)</option>
-          <option value="qwen2.5-coder">qwen2.5-coder (7B — code)</option>
-          <option value="deepseek-r1">deepseek-r1 (7B — reasoning)</option>
-          <option value="phi4">phi4 (14B — Microsoft)</option>
-          <option value="gemma2">gemma2 (9B — Google)</option>
-          <option value="codellama">codellama (7B — code)</option>
-        </select>
-        <input id="pull-model-custom" type="text" placeholder="or type model name…" />
-        <button id="pull-model-btn" class="btn primary">Pull</button>
+    <!-- BATCH TASKS TAB -->
+    <section id="tab-batch" class="tab-content">
+      <div class="panel">
+        <h2>⚡ Batch Tasks</h2>
+        <p class="hint">Enter one task per line — all will run in parallel.</p>
+        <textarea id="batch-input" placeholder="First task&#10;Second task&#10;Third task…" rows="6"></textarea>
+        <div class="btn-row">
+          <button id="batch-run-btn" class="btn primary">▶ Run All</button>
+        </div>
+        <div id="batch-result" class="output-box"></div>
       </div>
-      <div id="pull-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- MONITORING TAB -->
-  <section id="tab-monitoring" class="tab-content">
-    <div class="panel">
-      <h2>📊 Usage Statistics</h2>
-      <button id="refresh-stats-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="stats-grid" class="stats-grid"></div>
-    </div>
-    <div class="panel">
-      <h2>📜 Recent Requests</h2>
-      <div id="requests-list" class="output-box" style="max-height:400px;overflow-y:auto"></div>
-    </div>
-    <div class="panel">
-      <h2>📈 Hourly Summary</h2>
-      <div id="hourly-list" class="output-box" style="max-height:300px;overflow-y:auto"></div>
-    </div>
-  </section>
+    <!-- SCHEDULER TAB -->
+    <section id="tab-scheduler" class="tab-content">
+      <div class="panel">
+        <h2>Add Scheduled Task</h2>
+        <input id="sched-name" type="text" placeholder="Job name" />
+        <textarea id="sched-task" placeholder="Task description" rows="3"></textarea>
+        <div class="input-row">
+          <input id="sched-cron" type="text" placeholder="Cron expression (e.g. 0 8 * * *)" />
+          <button id="sched-add-btn" class="btn primary">Add Job</button>
+        </div>
+        <div id="sched-result" class="output-box" style="min-height:40px"></div>
+      </div>
+      <div class="panel">
+        <h2>Scheduled Jobs</h2>
+        <button id="refresh-sched-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="sched-list" class="tasks-list"></div>
+      </div>
+    </section>
 
-  <!-- MULTI-AGENT SYSTEM TAB -->
-  <section id="tab-agents" class="tab-content">
-    <div class="panel">
-      <h2>🤝 Agent Team</h2>
-      <div id="agents-grid" class="personas-grid"></div>
-    </div>
-    <div class="panel">
-      <h2>🧠 Run Multi-Agent Task</h2>
-      <p class="hint">Agents collaborate, debate, and synthesize the optimal answer together.</p>
-      <textarea id="agent-task-input" placeholder="Describe a complex task for the agent team… e.g. Design a secure REST API for user authentication" rows="4"></textarea>
-      <div class="btn-row">
-        <select id="agent-mode-select" style="width:auto;margin-bottom:0">
-          <option value="auto">Auto (smart routing)</option>
-          <option value="debate">Debate (full discussion)</option>
-          <option value="parallel">Parallel (all at once)</option>
-        </select>
-        <button id="agent-run-btn" class="btn primary">▶ Run Team</button>
+    <!-- MODELS TAB -->
+    <section id="tab-models" class="tab-content">
+      <div class="panel">
+        <h2>🧠 Available Models</h2>
+        <button id="refresh-models-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="models-status" class="hint"></div>
+        <div id="models-grid" class="models-grid"></div>
       </div>
-      <div id="agent-output" class="output-box" style="min-height:160px"></div>
-    </div>
-    <div class="panel">
-      <h2>📜 Team History</h2>
-      <button id="refresh-agent-history-btn" class="btn secondary small">↻ Refresh</button>
-      <div id="agent-history" class="tasks-list"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>⬇️ Pull a Local Model</h2>
+        <p class="hint">Requires <a href="https://ollama.com" target="_blank" class="link">Ollama</a> running locally.</p>
+        <div class="input-row">
+          <select id="pull-model-select">
+            <option value="llama3.2">llama3.2 (3B — fast)</option>
+            <option value="llama3.1">llama3.1 (8B)</option>
+            <option value="mistral">mistral (7B)</option>
+            <option value="mixtral">mixtral (47B MoE)</option>
+            <option value="qwen2.5">qwen2.5 (7B)</option>
+            <option value="qwen2.5-coder">qwen2.5-coder (7B — code)</option>
+            <option value="deepseek-r1">deepseek-r1 (7B — reasoning)</option>
+            <option value="deepseek-v4-flash">deepseek-v4-flash (284B MoE)</option>
+            <option value="phi4">phi4 (14B — Microsoft)</option>
+            <option value="gemma2">gemma2 (9B — Google)</option>
+            <option value="codellama">codellama (7B — code)</option>
+          </select>
+          <input id="pull-model-custom" type="text" placeholder="or type model name…" />
+          <button id="pull-model-btn" class="btn primary">Pull</button>
+        </div>
+        <div id="pull-result" class="output-box" style="min-height:40px"></div>
+      </div>
+    </section>
 
-  <!-- VOICE TAB -->
-  <section id="tab-voice" class="tab-content">
-    <div class="panel">
-      <h2>🎙️ Voice Input (Whisper)</h2>
-      <div id="voice-status" class="hint"></div>
-      <div class="upload-area" id="voice-upload-area">
-        <span>Drop an audio file here or <label for="voice-file-input" class="link">browse</label></span>
-        <input id="voice-file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" style="display:none" />
+    <!-- MONITORING TAB -->
+    <section id="tab-monitoring" class="tab-content">
+      <div class="panel">
+        <h2>📊 Usage Statistics</h2>
+        <button id="refresh-stats-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="stats-grid" class="stats-grid"></div>
       </div>
-      <div class="input-row" style="margin-top:10px">
-        <select id="voice-model-select" style="width:auto;margin-bottom:0;flex:0 0 auto">
-          <option value="tiny">tiny (fastest)</option>
-          <option value="base" selected>base (balanced)</option>
-          <option value="small">small (better)</option>
-          <option value="medium">medium (accurate)</option>
-        </select>
-        <input id="voice-language" type="text" placeholder="Language code (auto-detect if empty)" style="margin-bottom:0;flex:1" />
+      <div class="panel">
+        <h2>📜 Recent Requests</h2>
+        <div id="requests-list" class="output-box" style="max-height:400px;overflow-y:auto"></div>
       </div>
-      <div class="btn-row">
-        <button id="voice-transcribe-btn" class="btn primary">Transcribe</button>
-        <button id="voice-run-btn" class="btn secondary">Transcribe &amp; Run as Task</button>
+      <div class="panel">
+        <h2>📈 Hourly Summary</h2>
+        <div id="hourly-list" class="output-box" style="max-height:300px;overflow-y:auto"></div>
       </div>
-      <div id="voice-result" class="output-box"></div>
-    </div>
-    <div class="panel">
-      <h2>🎤 Record (Browser)</h2>
-      <p class="hint">Record directly from your microphone and transcribe.</p>
-      <div class="btn-row">
-        <button id="voice-record-btn" class="btn primary">⏺ Start Recording</button>
-        <button id="voice-stop-btn" class="btn secondary" disabled>⏹ Stop</button>
-      </div>
-      <audio id="voice-playback" controls style="width:100%;margin-bottom:12px;display:none"></audio>
-      <div id="voice-record-result" class="output-box" style="min-height:60px"></div>
-    </div>
-  </section>
+    </section>
 
-  <!-- AUTOMATION TAB -->
-  <section id="tab-automation" class="tab-content">
-    <div class="panel">
-      <h2>🌅 Morning Briefing</h2>
-      <p class="hint">Fetches tech news and generates a personalized daily briefing with AI.</p>
-      <input id="briefing-note" type="text" placeholder="Custom note for today (optional)…" />
-      <button id="briefing-btn" class="btn primary">Generate Briefing</button>
-      <div id="briefing-result" class="output-box" style="min-height:120px"></div>
-    </div>
-    <div class="panel">
-      <h2>💻 System Resources</h2>
-      <button id="refresh-resources-btn" class="btn secondary small">↻ Refresh</button>
-      <button id="monitor-start-btn" class="btn secondary small">▶ Start Monitor</button>
-      <button id="monitor-stop-btn" class="btn secondary small">⏹ Stop Monitor</button>
-      <div id="monitor-status" class="hint" style="margin-top:8px"></div>
-      <div id="resources-grid" class="stats-grid" style="margin-top:12px"></div>
-      <div id="top-processes" class="output-box" style="min-height:80px;margin-top:12px"></div>
-    </div>
-    <div class="panel">
-      <h2>🧹 System Maintenance</h2>
-      <p class="hint">Clean temporary files and old logs. Use Dry Run first to preview changes.</p>
-      <div class="btn-row">
-        <select id="maintenance-action" style="width:auto;margin-bottom:0">
-          <option value="all">All maintenance</option>
-          <option value="temp">Temp files only</option>
-          <option value="logs">Old logs only</option>
-          <option value="disk">Disk report only</option>
-        </select>
-        <button id="maintenance-dry-btn" class="btn secondary">Dry Run (Preview)</button>
-        <button id="maintenance-run-btn" class="btn danger">Run Cleanup</button>
+    <!-- MULTI-AGENT SYSTEM TAB -->
+    <section id="tab-agents" class="tab-content">
+      <div class="panel">
+        <h2>🤝 Agent Team</h2>
+        <div id="agents-grid" class="personas-grid"></div>
       </div>
-      <div id="maintenance-result" class="output-box" style="min-height:80px"></div>
-    </div>
-    <div class="panel">
-      <h2>🔔 Desktop Notification</h2>
-      <input id="notif-title" type="text" placeholder="Title" />
-      <input id="notif-body" type="text" placeholder="Message body…" />
-      <div class="input-row">
-        <select id="notif-urgency" style="width:auto;margin-bottom:0">
-          <option value="low">Low</option>
-          <option value="normal" selected>Normal</option>
-          <option value="critical">Critical</option>
-        </select>
-        <button id="notif-send-btn" class="btn primary">Send Notification</button>
+      <div class="panel">
+        <h2>🧠 Run Multi-Agent Task</h2>
+        <p class="hint">Agents collaborate, debate, and synthesize the optimal answer together.</p>
+        <textarea id="agent-task-input" placeholder="Describe a complex task for the agent team…" rows="4"></textarea>
+        <div class="btn-row">
+          <select id="agent-mode-select" style="width:auto;margin-bottom:0">
+            <option value="auto">Auto (smart routing)</option>
+            <option value="debate">Debate (full discussion)</option>
+            <option value="parallel">Parallel (all at once)</option>
+          </select>
+          <button id="agent-run-btn" class="btn primary">▶ Run Team</button>
+        </div>
+        <div id="agent-output" class="output-box" style="min-height:160px"></div>
       </div>
-      <div id="notif-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>📜 Team History</h2>
+        <button id="refresh-agent-history-btn" class="btn secondary small">↻ Refresh</button>
+        <div id="agent-history" class="tasks-list"></div>
+      </div>
+    </section>
 
-  <!-- SELF-HEALING TAB -->
-  <section id="tab-healer" class="tab-content">
-    <div class="panel">
-      <h2>🔧 Analyze &amp; Fix an Error</h2>
-      <p class="hint">Paste an error traceback — the system will generate and optionally apply a code patch.</p>
-      <textarea id="heal-error" placeholder="Paste error traceback here…" rows="6"></textarea>
-      <input id="heal-task" type="text" placeholder="What task triggered this error? (optional context)" />
-      <input id="heal-file" type="text" placeholder="File hint e.g. core/orchestrator.py (optional)" />
-      <div class="btn-row">
-        <button id="heal-analyze-btn" class="btn primary">🔍 Analyze</button>
-        <button id="heal-auto-btn" class="btn secondary">⚡ Analyze + Auto-Apply</button>
+    <!-- VOICE TAB -->
+    <section id="tab-voice" class="tab-content">
+      <div class="panel">
+        <h2>🎙️ Voice Input (Whisper)</h2>
+        <div id="voice-status" class="hint"></div>
+        <div class="upload-area" id="voice-upload-area">
+          <span>Drop an audio file here or <label for="voice-file-input" class="link">browse</label></span>
+          <input id="voice-file-input" type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.webm" style="display:none" />
+        </div>
+        <div class="input-row" style="margin-top:10px">
+          <select id="voice-model-select" style="width:auto;margin-bottom:0;flex:0 0 auto">
+            <option value="tiny">tiny (fastest)</option>
+            <option value="base" selected>base (balanced)</option>
+            <option value="small">small (better)</option>
+            <option value="medium">medium (accurate)</option>
+          </select>
+          <input id="voice-language" type="text" placeholder="Language code (auto-detect if empty)" style="margin-bottom:0;flex:1" />
+        </div>
+        <div class="btn-row">
+          <button id="voice-transcribe-btn" class="btn primary">Transcribe</button>
+          <button id="voice-run-btn" class="btn secondary">Transcribe &amp; Run as Task</button>
+        </div>
+        <div id="voice-result" class="output-box"></div>
       </div>
-      <div id="heal-result" class="output-box" style="min-height:120px"></div>
-    </div>
-    <div class="panel">
-      <h2>📜 Heal Log</h2>
-      <button id="refresh-heal-log-btn" class="btn secondary small">↻ Refresh</button>
-      <button id="refresh-backups-btn" class="btn secondary small">📦 Backups</button>
-      <div id="heal-log" class="tasks-list" style="margin-top:12px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>🎤 Record (Browser)</h2>
+        <div class="btn-row">
+          <button id="voice-record-btn" class="btn primary">⏺ Start Recording</button>
+          <button id="voice-stop-btn" class="btn secondary" disabled>⏹ Stop</button>
+        </div>
+        <audio id="voice-playback" controls style="width:100%;margin-bottom:12px;display:none"></audio>
+        <div id="voice-record-result" class="output-box" style="min-height:60px"></div>
+      </div>
+    </section>
 
-  <!-- DIGITAL TWIN TAB -->
-  <section id="tab-twin" class="tab-content">
-    <div class="panel">
-      <h2>🪞 Your Digital Twin</h2>
-      <div class="input-row">
-        <input id="twin-name" type="text" placeholder="Your name (personalizes the twin)" style="margin-bottom:0" />
-        <button id="twin-name-btn" class="btn secondary">Set Name</button>
+    <!-- AUTOMATION TAB -->
+    <section id="tab-automation" class="tab-content">
+      <div class="panel">
+        <h2>🌅 Morning Briefing</h2>
+        <input id="briefing-note" type="text" placeholder="Custom note for today (optional)…" />
+        <button id="briefing-btn" class="btn primary">Generate Briefing</button>
+        <div id="briefing-result" class="output-box" style="min-height:120px"></div>
       </div>
-      <button id="twin-profile-btn" class="btn primary" style="margin-top:10px">Load Profile &amp; Summary</button>
-      <div id="twin-summary" class="output-box" style="min-height:80px;margin-top:10px"></div>
-    </div>
-    <div class="panel">
-      <h2>📥 Train Your Twin</h2>
-      <p class="hint">Upload code files, notes, or documents — the twin learns your thinking style.</p>
-      <div class="upload-area" id="twin-upload-area">
-        <span>Drop files here or <label for="twin-file-input" class="link">browse</label></span>
-        <input id="twin-file-input" type="file" accept=".py,.md,.txt,.js,.ts,.java,.cpp,.rs" multiple style="display:none" />
+      <div class="panel">
+        <h2>💻 System Resources</h2>
+        <button id="refresh-resources-btn" class="btn secondary small">↻ Refresh</button>
+        <button id="monitor-start-btn" class="btn secondary small">▶ Start Monitor</button>
+        <button id="monitor-stop-btn" class="btn secondary small">⏹ Stop Monitor</button>
+        <div id="monitor-status" class="hint" style="margin-top:8px"></div>
+        <div id="resources-grid" class="stats-grid" style="margin-top:12px"></div>
+        <div id="top-processes" class="output-box" style="min-height:80px;margin-top:12px"></div>
       </div>
-      <input id="twin-dir" type="text" placeholder="Or ingest a full directory path e.g. ~/projects/myapp" />
-      <div class="btn-row">
-        <button id="twin-ingest-file-btn" class="btn primary">Ingest Files</button>
-        <button id="twin-ingest-dir-btn" class="btn secondary">Ingest Directory</button>
+      <div class="panel">
+        <h2>🧹 System Maintenance</h2>
+        <div class="btn-row">
+          <select id="maintenance-action" style="width:auto;margin-bottom:0">
+            <option value="all">All maintenance</option>
+            <option value="temp">Temp files only</option>
+            <option value="logs">Old logs only</option>
+            <option value="disk">Disk report only</option>
+          </select>
+          <button id="maintenance-dry-btn" class="btn secondary">Dry Run (Preview)</button>
+          <button id="maintenance-run-btn" class="btn danger">Run Cleanup</button>
+        </div>
+        <div id="maintenance-result" class="output-box" style="min-height:80px"></div>
       </div>
-      <div id="twin-ingest-result" class="output-box" style="min-height:40px"></div>
-    </div>
-    <div class="panel">
-      <h2>💬 Ask Your Twin</h2>
-      <p class="hint">The twin answers based on YOUR thinking style, not generic AI.</p>
-      <textarea id="twin-question" placeholder="Ask your twin anything… e.g. How would I design a caching layer for this project?" rows="3"></textarea>
-      <button id="twin-ask-btn" class="btn primary">Ask Twin</button>
-      <div id="twin-answer" class="output-box" style="min-height:100px"></div>
-    </div>
-    <div class="panel">
-      <h2>🧠 Probing Session</h2>
-      <p class="hint">The twin asks you questions to better understand your thinking patterns.</p>
-      <button id="twin-probe-btn" class="btn secondary">Generate Question</button>
-      <div id="twin-probe-question" class="output-box" style="min-height:50px;margin:10px 0"></div>
-      <textarea id="twin-probe-answer" placeholder="Your answer…" rows="3"></textarea>
-      <button id="twin-probe-submit-btn" class="btn primary">Submit Answer</button>
-      <div id="twin-probe-result" class="output-box" style="min-height:40px"></div>
-    </div>
-  </section>
+      <div class="panel">
+        <h2>🔔 Desktop Notification</h2>
+        <input id="notif-title" type="text" placeholder="Title" />
+        <input id="notif-body" type="text" placeholder="Message body…" />
+        <div class="input-row">
+          <select id="notif-urgency" style="width:auto;margin-bottom:0">
+            <option value="low">Low</option>
+            <option value="normal" selected>Normal</option>
+            <option value="critical">Critical</option>
+          </select>
+          <button id="notif-send-btn" class="btn primary">Send Notification</button>
+        </div>
+        <div id="notif-result" class="output-box" style="min-height:40px"></div>
+      </div>
+    </section>
 
-  <div id="toast" class="toast"></div>
-  <script src="/static/js/main.js"></script>
+    <!-- SELF-HEALING TAB -->
+    <section id="tab-healer" class="tab-content">
+      <div class="panel">
+        <h2>🔧 Analyze &amp; Fix an Error</h2>
+        <p class="hint">Paste an error traceback — the system will generate and optionally apply a code patch.</p>
+        <textarea id="heal-error" placeholder="Paste error traceback here…" rows="6"></textarea>
+        <input id="heal-task" type="text" placeholder="What task triggered this error? (optional context)" />
+        <input id="heal-file" type="text" placeholder="File hint e.g. core/orchestrator.py (optional)" />
+        <div class="btn-row">
+          <button id="heal-auto-btn" class="btn secondary">⚡ Analyze + Auto-Apply</button>
+          <button id="heal-analyze-btn" class="btn primary">🔍 Analyze</button>
+        </div>
+        <div id="heal-result" class="output-box" style="min-height:120px"></div>
+      </div>
+      <div class="panel">
+        <h2>📜 Heal Log</h2>
+        <button id="refresh-heal-log-btn" class="btn secondary small">↻ Refresh</button>
+        <button id="refresh-backups-btn" class="btn secondary small">📦 Backups</button>
+        <div id="heal-log" class="tasks-list" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- DIGITAL TWIN TAB -->
+    <section id="tab-twin" class="tab-content">
+      <div class="panel">
+        <h2>🪞 Your Digital Twin</h2>
+        <div class="input-row">
+          <input id="twin-name" type="text" placeholder="Your name (personalizes the twin)" style="margin-bottom:0" />
+          <button id="twin-name-btn" class="btn secondary">Set Name</button>
+        </div>
+        <button id="twin-profile-btn" class="btn primary" style="margin-top:10px">Load Profile &amp; Summary</button>
+        <div id="twin-summary" class="output-box" style="min-height:80px;margin-top:10px"></div>
+      </div>
+      <div class="panel">
+        <h2>📥 Train Your Twin</h2>
+        <div class="upload-area" id="twin-upload-area">
+          <span>Drop files here or <label for="twin-file-input" class="link">browse</label></span>
+          <input id="twin-file-input" type="file" accept=".py,.md,.txt,.js,.ts,.java,.cpp,.rs" multiple style="display:none" />
+        </div>
+        <input id="twin-dir" type="text" placeholder="Or ingest a full directory path e.g. ~/projects/myapp" />
+        <div class="btn-row">
+          <button id="twin-ingest-file-btn" class="btn primary">Ingest Files</button>
+          <button id="twin-ingest-dir-btn" class="btn secondary">Ingest Directory</button>
+        </div>
+        <div id="twin-ingest-result" class="output-box" style="min-height:40px"></div>
+      </div>
+      <div class="panel">
+        <h2>💬 Ask Your Twin</h2>
+        <textarea id="twin-question" placeholder="Ask your twin anything…" rows="3"></textarea>
+        <button id="twin-ask-btn" class="btn primary">Ask Twin</button>
+        <div id="twin-answer" class="output-box" style="min-height:100px"></div>
+      </div>
+      <div class="panel">
+        <h2>🧠 Probing Session</h2>
+        <button id="twin-probe-btn" class="btn secondary">Generate Question</button>
+        <div id="twin-probe-question" class="output-box" style="min-height:50px;margin:10px 0"></div>
+        <textarea id="twin-probe-answer" placeholder="Your answer…" rows="3"></textarea>
+        <button id="twin-probe-submit-btn" class="btn primary">Submit Answer</button>
+        <div id="twin-probe-result" class="output-box" style="min-height:40px"></div>
+      </div>
+    </section>
+
+  </div><!-- /app-content -->
+</div><!-- /app-layout -->
+
+<div id="toast" class="toast"></div>
+<script src="/static/js/main.js"></script>
 </body>
 </html>
