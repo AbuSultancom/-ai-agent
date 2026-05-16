@@ -13,6 +13,7 @@
     <div class="chat-brand">🤖 AI Agent</div>
     <div class="chat-header-right">
       <button class="icon-btn" id="new-chat-btn" title="New chat">✏️</button>
+      <button class="icon-btn" id="history-btn" title="Chat history">🕐</button>
       <select id="global-model-select" title="Active model"></select>
       <div id="health-dot" class="health-dot" title="Server status"></div>
     </div>
@@ -51,6 +52,17 @@
   </div>
 
 </div>
+
+<!-- History panel -->
+<div id="history-panel" class="history-panel hidden">
+  <div class="history-header">
+    <span>Previous chats</span>
+    <button class="icon-btn" id="history-close-btn">✕</button>
+  </div>
+  <div id="history-list" class="history-list"></div>
+</div>
+<div id="history-overlay" class="history-overlay hidden"></div>
+
 <div id="toast" class="toast"></div>
 <script src="/static/js/main.js"></script>
 </body>

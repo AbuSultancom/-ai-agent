@@ -220,8 +220,83 @@ function chipSend(text) {
   sendSmartMessage();
 }
 
+/* ── Conversation history (localStorage) ── */
+const HISTORY_KEY = 'ai_agent_chats';
+
+function loadStoredChats() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+}
+
+function saveCurrentChat() {
+  if (!conversationHistory.length) return;
+  const chats = loadStoredChats();
+  const title = conversationHistory[0]?.content?.slice(0, 60) || 'Chat';
+  const id = Date.now().toString();
+  chats.unshift({ id, title, messages: conversationHistory, ts: new Date().toLocaleString() });
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(chats.slice(0, 50)));
+}
+
+function renderHistoryList() {
+  const list = $('history-list');
+  const chats = loadStoredChats();
+  if (!chats.length) {
+    list.innerHTML = '<div class="history-empty">No previous chats</div>';
+    return;
+  }
+  list.innerHTML = chats.map(c => `
+    <div class="history-item" onclick="loadChat('${c.id}')">
+      <div class="hi-title">${escHtml(c.title)}</div>
+      <div class="hi-meta">
+        <span>${c.ts}</span>
+        <button class="hi-del" onclick="deleteChat(event,'${c.id}')">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+function loadChat(id) {
+  const chats = loadStoredChats();
+  const chat = chats.find(c => c.id === id);
+  if (!chat) return;
+  saveCurrentChat();
+  conversationHistory = chat.messages;
+  closeHistory();
+  // Re-render messages
+  const msgs = $('chat-messages');
+  msgs.innerHTML = '';
+  conversationHistory.forEach(m => {
+    if (m.role === 'user') appendUserBubble(m.content, null);
+    else {
+      const c = appendAssistantBubble();
+      c.innerHTML = renderMarkdown(escHtml(m.content));
+    }
+  });
+}
+
+function deleteChat(evt, id) {
+  evt.stopPropagation();
+  const chats = loadStoredChats().filter(c => c.id !== id);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(chats));
+  renderHistoryList();
+}
+
+function openHistory() {
+  renderHistoryList();
+  $('history-panel').classList.remove('hidden');
+  $('history-overlay').classList.remove('hidden');
+}
+
+function closeHistory() {
+  $('history-panel').classList.add('hidden');
+  $('history-overlay').classList.add('hidden');
+}
+
+$('history-btn').addEventListener('click', openHistory);
+$('history-close-btn').addEventListener('click', closeHistory);
+$('history-overlay').addEventListener('click', closeHistory);
+
 /* ── New chat ── */
 function newChat() {
+  saveCurrentChat();
   conversationHistory = [];
   $('chat-messages').innerHTML = `
     <div id="chat-welcome" class="chat-welcome">
