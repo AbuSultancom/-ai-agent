@@ -330,3 +330,28 @@ class AIOrchestrator:
 
     def run_task_sync(self, task: str) -> str:
         return "".join(self.run_task(task))
+
+    def run_with_messages(self, messages: list[dict], model: str | None = None) -> Generator[str, None, None]:
+        """Like run_task but accepts a pre-built message list (supports chat history)."""
+        from core import model_router
+        model = model or config.MODEL
+        msgs = list(messages)
+
+        for iteration in range(config.MAX_AGENT_ITERATIONS):
+            response = model_router.chat_with_tools(msgs, self.tools, model=model, system=SYSTEM_PROMPT)
+            if response["text"]:
+                yield response["text"]
+            if response["stop_reason"] == "end_turn":
+                break
+            if response["stop_reason"] != "tool_use":
+                break
+            msgs.append(response["_history_assistant"])
+            tool_results = []
+            for tc in response["tool_calls"]:
+                preview = json.dumps(tc["inputs"], ensure_ascii=False)[:120]
+                yield f"\n\n**[{tc['name']}]** `{preview}`\n"
+                result = self._dispatch_tool(tc["name"], tc["inputs"])
+                tool_results.append({"id": tc["id"], "result": result})
+            msgs.extend(model_router.build_tool_result_messages(tool_results, model))
+            if iteration == config.MAX_AGENT_ITERATIONS - 1:
+                yield "\n\n[Max iterations reached]"

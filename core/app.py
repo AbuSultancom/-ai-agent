@@ -1293,5 +1293,152 @@ def twin_log():
     return jsonify({"log": get_twin().get_ingestion_log()})
 
 
+# ── Unified Chat (single interface with tool use + streaming) ─────────────────
+
+@app.route("/api/unified/stream", methods=["POST"])
+def unified_stream():
+    """SSE stream: routes through orchestrator, emits typed events for text + tool calls."""
+    import re
+    from flask import stream_with_context
+
+    data = request.get_json(silent=True) or {}
+    message = data.get("message", "").strip()
+    history = data.get("history", [])   # [{role, content}, ...]
+    model = data.get("model") or config.MODEL
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    _tool_re = re.compile(r'^\s*\*\*\[(\w+)\]\*\*\s*`(.*?)`\s*$', re.DOTALL)
+
+    def generate():
+        from core.orchestrator import AIOrchestrator
+        orch = AIOrchestrator()
+        messages = list(history) + [{"role": "user", "content": message}]
+
+        text_buf = ""
+        for chunk in orch.run_with_messages(messages, model=model):
+            m = _tool_re.match(chunk.strip())
+            if m:
+                if text_buf.strip():
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+                yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
+            else:
+                text_buf += chunk
+                if len(text_buf) >= 40:
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+
+        if text_buf.strip():
+            yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
+@app.route("/api/smart/stream", methods=["POST"])
+def smart_stream():
+    """Multimodal unified endpoint: text, image, file → auto-routed SSE."""
+    import re
+    import base64
+    import mimetypes
+    from flask import stream_with_context
+
+    message = request.form.get("message", "").strip()
+    try:
+        history = json.loads(request.form.get("history", "[]"))
+    except Exception:
+        history = []
+    model = request.form.get("model") or config.MODEL
+    files = request.files.getlist("files")
+
+    _tool_re = re.compile(r'^\s*\*\*\[(\w+)\]\*\*\s*`(.*?)`\s*$', re.DOTALL)
+
+    def _sse_agent(messages, model):
+        """Run orchestrator loop and yield SSE data lines."""
+        from core.orchestrator import AIOrchestrator
+        orch = AIOrchestrator()
+        text_buf = ""
+        for chunk in orch.run_with_messages(messages, model=model):
+            m = _tool_re.match(chunk.strip())
+            if m:
+                if text_buf.strip():
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+                yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
+            else:
+                text_buf += chunk
+                if len(text_buf) >= 40:
+                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                    text_buf = ""
+        if text_buf.strip():
+            yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    def generate():
+        if files:
+            file = files[0]
+            filename = file.filename or "file"
+            mimetype = file.content_type or mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            file_bytes = file.read()
+
+            if mimetype.startswith("image/"):
+                # Vision route: include image in Claude message
+                img_b64 = base64.standard_b64encode(file_bytes).decode()
+                user_content = [
+                    {"type": "image", "source": {"type": "base64", "media_type": mimetype, "data": img_b64}},
+                    {"type": "text", "text": message or "Describe this image in detail."},
+                ]
+                from core import model_router
+                msgs = list(history) + [{"role": "user", "content": user_content}]
+                try:
+                    response = model_router.chat_with_tools(msgs, [], model=model, system=None)
+                    text = response.get("text", "") or "No description generated."
+                    yield f"data: {json.dumps({'type':'text','content':text}, ensure_ascii=False)}\n\n"
+                except Exception as exc:
+                    yield f"data: {json.dumps({'type':'text','content':f'Vision error: {exc}'}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+            else:
+                # Read file content and inject into agent message
+                try:
+                    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+                    if ext in ("csv", "xlsx", "xls"):
+                        try:
+                            import io
+                            import csv as csv_mod
+                            text_io = io.StringIO(file_bytes.decode("utf-8", errors="replace"))
+                            reader = csv_mod.reader(text_io)
+                            rows = list(reader)
+                            preview = "\n".join(",".join(r) for r in rows[:30])
+                            file_content = f"[CSV file: {filename}] ({len(rows)} rows)\n\n{preview}"
+                        except Exception as e:
+                            file_content = f"[File: {filename}] (CSV parse error: {e})"
+                    else:
+                        raw = file_bytes.decode("utf-8", errors="replace")
+                        file_content = f"[File: {filename}]\n\n{raw[:10000]}"
+                except Exception as e:
+                    file_content = f"[File: {filename}] (read error: {e})"
+
+                full_msg = f"{file_content}\n\n{message}" if message else file_content
+                msgs = list(history) + [{"role": "user", "content": full_msg}]
+                yield from _sse_agent(msgs, model)
+        else:
+            if not message:
+                yield f"data: {json.dumps({'type':'text','content':'Please enter a message.'}, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            msgs = list(history) + [{"role": "user", "content": message}]
+            yield from _sse_agent(msgs, model)
+
+    resp = Response(stream_with_context(generate()), mimetype="text/event-stream")
+    resp.headers["Cache-Control"] = "no-cache"
+    resp.headers["X-Accel-Buffering"] = "no"
+    return resp
+
+
 if __name__ == "__main__":
     app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG)
