@@ -913,6 +913,109 @@ def notify_telegram():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/settings", methods=["GET"])
+def get_settings():
+    """Return current settings (sensitive values masked)."""
+    def mask(val: str) -> str:
+        if not val or len(val) < 8:
+            return "***" if val else ""
+        return val[:4] + "***" + val[-3:]
+
+    return jsonify({
+        "ANTHROPIC_API_KEY":    mask(config.ANTHROPIC_API_KEY),
+        "MODEL":                config.MODEL,
+        "TELEGRAM_TOKEN":       mask(config.TELEGRAM_TOKEN),
+        "TELEGRAM_CHAT_ID":     config.TELEGRAM_CHAT_ID,
+        "SLACK_WEBHOOK":        mask(getattr(config, "SLACK_WEBHOOK", "") or ""),
+        "OLLAMA_URL":           config.OLLAMA_URL,
+        "LOCAL_MODEL":          config.LOCAL_MODEL,
+        "MAX_AGENT_ITERATIONS": config.MAX_AGENT_ITERATIONS,
+        "BASH_TIMEOUT":         config.BASH_TIMEOUT,
+        "_has_telegram":        bool(config.TELEGRAM_TOKEN and config.TELEGRAM_CHAT_ID),
+        "_has_anthropic":       bool(config.ANTHROPIC_API_KEY.startswith("sk-ant-")),
+    })
+
+
+@app.route("/api/settings", methods=["POST"])
+def save_settings():
+    """Save settings to .env file and reload config live."""
+    data = request.get_json(silent=True) or {}
+
+    allowed = {
+        "ANTHROPIC_API_KEY", "MODEL", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID",
+        "SLACK_WEBHOOK", "OLLAMA_URL", "LOCAL_MODEL",
+        "MAX_AGENT_ITERATIONS", "BASH_TIMEOUT",
+    }
+
+    env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+    env_path = os.path.abspath(env_path)
+
+    # Read current .env lines
+    lines = []
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+    updated = set()
+    for key, value in data.items():
+        if key not in allowed:
+            continue
+        if "***" in str(value):
+            continue  # skip masked placeholders
+        found = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}=") or line.startswith(f"{key} ="):
+                lines[i] = f"{key}={value}\n"
+                found = True
+                break
+        if not found:
+            lines.append(f"{key}={value}\n")
+        updated.add(key)
+        # Apply live without restart
+        os.environ[key] = str(value)
+
+    with open(env_path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+    # Reload config values live
+    if "TELEGRAM_TOKEN" in updated:
+        config.TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+    if "TELEGRAM_CHAT_ID" in updated:
+        config.TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if "ANTHROPIC_API_KEY" in updated:
+        config.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+    if "MODEL" in updated:
+        config.MODEL = os.environ.get("MODEL", config.MODEL)
+    if "OLLAMA_URL" in updated:
+        config.OLLAMA_URL = os.environ.get("OLLAMA_URL", config.OLLAMA_URL)
+    if "LOCAL_MODEL" in updated:
+        config.LOCAL_MODEL = os.environ.get("LOCAL_MODEL", config.LOCAL_MODEL)
+
+    return jsonify({"ok": True, "updated": list(updated)})
+
+
+@app.route("/api/settings/test-telegram", methods=["POST"])
+def test_telegram():
+    """Send a test Telegram message using the currently saved token/chat_id."""
+    token = config.TELEGRAM_TOKEN
+    chat_id = config.TELEGRAM_CHAT_ID
+    if not token or not chat_id:
+        return jsonify({"ok": False, "error": "TELEGRAM_TOKEN and TELEGRAM_CHAT_ID not set"}), 503
+    try:
+        import requests as _req
+        r = _req.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": "✅ AI Agent connected to Telegram!", "parse_mode": "Markdown"},
+            timeout=10,
+        )
+        result = r.json()
+        if result.get("ok"):
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": result.get("description", "Unknown error")})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/notify/discord", methods=["POST"])
 def notify_discord():
     data = request.get_json(silent=True) or {}

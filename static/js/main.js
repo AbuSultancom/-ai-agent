@@ -625,3 +625,105 @@ $('unified-input').addEventListener('input', function () {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 200) + 'px';
 });
+
+/* ── Settings modal ── */
+async function openSettings() {
+  $('settings-overlay').classList.remove('hidden');
+  try {
+    const r = await fetch('/api/settings', { headers: getAuthHeader() });
+    const d = await r.json();
+
+    $('s-tg-token').value  = d.TELEGRAM_TOKEN   || '';
+    $('s-tg-chat').value   = d.TELEGRAM_CHAT_ID  || '';
+    $('s-api-key').value   = d.ANTHROPIC_API_KEY  || '';
+    $('s-ollama-url').value= d.OLLAMA_URL         || '';
+    $('s-local-model').value=d.LOCAL_MODEL        || '';
+    $('s-max-iter').value  = d.MAX_AGENT_ITERATIONS|| '';
+    $('s-bash-timeout').value=d.BASH_TIMEOUT      || '';
+
+    const modelSel = $('s-model');
+    if (d.MODEL) modelSel.value = d.MODEL;
+
+    const tgBadge = $('tg-status-badge');
+    tgBadge.textContent = d._has_telegram ? '✅ Connected' : '⚠️ Not set';
+    tgBadge.className = 'settings-badge ' + (d._has_telegram ? 'ok' : 'err');
+
+    const apiBadge = $('api-status-badge');
+    apiBadge.textContent = d._has_anthropic ? '✅ Connected' : '⚠️ Not set';
+    apiBadge.className = 'settings-badge ' + (d._has_anthropic ? 'ok' : 'err');
+  } catch(e) {
+    showToast('Failed to load settings', 'err');
+  }
+}
+
+function closeSettings() {
+  $('settings-overlay').classList.add('hidden');
+  $('tg-test-result').textContent = '';
+}
+
+async function saveSettings() {
+  const btn = $('settings-save-btn');
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const payload = {
+      TELEGRAM_TOKEN:       $('s-tg-token').value.trim(),
+      TELEGRAM_CHAT_ID:     $('s-tg-chat').value.trim(),
+      ANTHROPIC_API_KEY:    $('s-api-key').value.trim(),
+      MODEL:                $('s-model').value,
+      OLLAMA_URL:           $('s-ollama-url').value.trim(),
+      LOCAL_MODEL:          $('s-local-model').value.trim(),
+      MAX_AGENT_ITERATIONS: $('s-max-iter').value,
+      BASH_TIMEOUT:         $('s-bash-timeout').value,
+    };
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showToast('Settings saved ✅', 'ok');
+      closeSettings();
+      loadModels();
+    } else {
+      showToast('Save failed: ' + (d.error || 'unknown'), 'err');
+    }
+  } catch(e) {
+    showToast('Error: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Save Settings';
+  }
+}
+
+async function testTelegram() {
+  const resultEl = $('tg-test-result');
+  resultEl.textContent = 'Sending…';
+  try {
+    const r = await fetch('/api/settings/test-telegram', {
+      method: 'POST',
+      headers: getAuthHeader(),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      resultEl.style.color = 'var(--ok)';
+      resultEl.textContent = '✅ Message sent!';
+    } else {
+      resultEl.style.color = 'var(--err)';
+      resultEl.textContent = '❌ ' + (d.error || 'Failed');
+    }
+  } catch(e) {
+    resultEl.style.color = 'var(--err)';
+    resultEl.textContent = '❌ ' + e.message;
+  }
+}
+
+$('settings-btn').addEventListener('click', openSettings);
+$('settings-close-btn').addEventListener('click', closeSettings);
+$('settings-cancel-btn').addEventListener('click', closeSettings);
+$('settings-save-btn').addEventListener('click', saveSettings);
+$('tg-test-btn').addEventListener('click', testTelegram);
+$('settings-overlay').addEventListener('click', e => {
+  if (e.target === $('settings-overlay')) closeSettings();
+});
