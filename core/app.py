@@ -1361,23 +1361,31 @@ def smart_stream():
 
     def _sse_agent(messages, model):
         """Run orchestrator loop and yield SSE data lines."""
+        import requests as _req
         from core.orchestrator import AIOrchestrator
         orch = AIOrchestrator()
         text_buf = ""
-        for chunk in orch.run_with_messages(messages, model=model):
-            m = _tool_re.match(chunk.strip())
-            if m:
-                if text_buf.strip():
-                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
-                    text_buf = ""
-                yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
-            else:
-                text_buf += chunk
-                if len(text_buf) >= 40:
-                    yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
-                    text_buf = ""
-        if text_buf.strip():
-            yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+        try:
+            for chunk in orch.run_with_messages(messages, model=model):
+                m = _tool_re.match(chunk.strip())
+                if m:
+                    if text_buf.strip():
+                        yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                        text_buf = ""
+                    yield f"data: {json.dumps({'type':'tool','name':m.group(1),'args':m.group(2)}, ensure_ascii=False)}\n\n"
+                else:
+                    text_buf += chunk
+                    if len(text_buf) >= 40:
+                        yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+                        text_buf = ""
+            if text_buf.strip():
+                yield f"data: {json.dumps({'type':'text','content':text_buf}, ensure_ascii=False)}\n\n"
+        except _req.exceptions.ConnectionError:
+            err = f"Cannot connect to Ollama at {config.OLLAMA_URL}. Is Ollama running? Start it with: ollama serve"
+            yield f"data: {json.dumps({'type':'text','content':err}, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            logger.exception("smart_stream agent error")
+            yield f"data: {json.dumps({'type':'text','content':f'Error: {exc}'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     def generate():
