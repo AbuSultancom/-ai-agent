@@ -162,6 +162,129 @@ docker compose up --build
 
 ---
 
+## Commands & Shortcuts
+
+### CLI Commands
+
+#### 🐧 Linux / macOS (`ai` command)
+
+After `sudo bash scripts/install.sh`:
+
+```bash
+ai "Write a Python script that counts words in a file"
+ai chat "Explain the difference between RAG and fine-tuning"
+ai status          # check if service is running
+ai logs            # follow live logs (journalctl)
+ai start           # start service
+ai stop            # stop service
+ai restart         # restart service
+```
+
+#### 🪟 Windows (`ai.ps1`)
+
+Add to PowerShell profile for global use:
+```powershell
+# Add to $PROFILE (run once):
+function ai { & "C:\path\to\ai-agent\scripts\ai.ps1" @args }
+```
+
+Then:
+```powershell
+ai "Write a Python script that counts words in a file"
+ai chat "Explain quantum computing"
+ai status
+ai help
+```
+
+#### Both platforms — direct Python CLI
+
+```bash
+# Start web server
+python orchestrator.py serve
+
+# Run a task directly (with tool use)
+python orchestrator.py run "List all Python files and summarize each"
+
+# Show task plan only (no execution)
+python orchestrator.py plan "Build a REST API for a todo list"
+```
+
+---
+
+### AI Shell (aish) — Linux/macOS
+
+An intelligent terminal that translates natural language to shell commands:
+
+```bash
+# Install
+sudo cp scripts/aish /usr/local/bin/aish && sudo chmod +x /usr/local/bin/aish
+
+# Use
+aish                          # interactive mode
+aish "show large files"       # one-shot (translates → executes)
+aish -c "analyze this repo"   # run as full agent task
+```
+
+Inside `aish`:
+| Input | Action |
+|---|---|
+| `show all python files` | AI translates → `find . -name "*.py"` |
+| `!ls -la` | Run directly (skip AI) |
+| `!!analyze this codebase` | Run as full agent task |
+| `cd projects` | Change directory |
+| `history` | Show command history |
+| `exit` | Quit |
+
+---
+
+### Web Dashboard Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `Enter` | Submit message / task |
+| `Shift+Enter` | New line in input |
+| `Ctrl+L` | Clear chat |
+| `Esc` | Cancel / close modal |
+
+---
+
+### API Quick Reference
+
+```bash
+# Health check
+curl http://localhost:5000/health
+
+# Run a task
+curl -X POST http://localhost:5000/api/task/run \
+  -H "Content-Type: application/json" \
+  -d '{"task": "List all Python files"}'
+
+# Chat
+curl -X POST http://localhost:5000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+
+# Store a memory
+curl -X POST http://localhost:5000/api/memory \
+  -H "Content-Type: application/json" \
+  -d '{"key": "note1", "content": "Remember to update docs"}'
+
+# Search memory
+curl -X POST http://localhost:5000/api/memory/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "docs update"}'
+
+# List all models (Claude + Ollama)
+curl http://localhost:5000/api/models
+
+# Pull an Ollama model
+curl -X POST http://localhost:5000/api/models/pull \
+  -H "Content-Type: application/json" \
+  -d '{"model": "llama3.2"}'
+```
+
+---
+
 ## Install as a System Service (Linux)
 
 Run the agent as a **persistent systemd service** that starts on boot and restarts automatically on failure.
