@@ -24,11 +24,21 @@ function escHtml(s) {
 }
 
 function renderMarkdown(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-    .replace(/```[\s\S]*?```/g, m => `<pre>${escHtml(m.slice(3, -3).replace(/^\w+\n/, ''))}</pre>`)
-    .replace(/\n/g, '<br>');
+  // Fenced code blocks with language detection
+  text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const language = lang || 'text';
+    const highlighted = (typeof Prism !== 'undefined' && Prism.languages[language])
+      ? Prism.highlight(code.trim(), Prism.languages[language], language)
+      : escHtml(code.trim());
+    return `<pre class="language-${language}"><code class="language-${language}">${highlighted}</code></pre>`;
+  });
+  // Inline code
+  text = text.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  // Bold
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Newlines (but not inside pre blocks)
+  text = text.replace(/\n/g, '<br>');
+  return text;
 }
 
 function showToast(msg, type = 'ok') {
@@ -396,6 +406,216 @@ async function sendSmartMessage() {
     $('unified-send-btn').disabled = false;
   }
 }
+
+/* ── Drag & drop ── */
+const chatMsgs = $('chat-messages');
+chatMsgs.addEventListener('dragover', e => {
+  e.preventDefault();
+  chatMsgs.classList.add('drag-over');
+});
+chatMsgs.addEventListener('dragleave', () => chatMsgs.classList.remove('drag-over'));
+chatMsgs.addEventListener('drop', e => {
+  e.preventDefault();
+  chatMsgs.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  attachedFile = file;
+  showAttachPreview(file);
+});
+
+/* ── Export conversation ── */
+function exportConversation() {
+  if (!conversationHistory.length) { showToast('No conversation to export', 'err'); return; }
+  const lines = conversationHistory.map(m =>
+    `## ${m.role === 'user' ? '👤 You' : '🤖 Assistant'}\n\n${m.content}`
+  );
+  const md = `# AI Agent Conversation\n_Exported ${new Date().toLocaleString()}_\n\n` + lines.join('\n\n---\n\n');
+  const blob = new Blob([md], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `chat-${Date.now()}.md`;
+  a.click();
+  showToast('Conversation exported', 'ok');
+}
+$('export-btn').addEventListener('click', exportConversation);
+
+/* ── File explorer ── */
+function openExplorer() {
+  $('explorer-panel').classList.remove('hidden');
+  $('explorer-overlay').classList.remove('hidden');
+  loadFileTree();
+}
+function closeExplorer() {
+  $('explorer-panel').classList.add('hidden');
+  $('explorer-overlay').classList.add('hidden');
+}
+async function loadFileTree() {
+  const tree = $('explorer-tree');
+  tree.textContent = 'Loading…';
+  try {
+    const r = await fetch('/api/files/tree', { headers: getAuthHeader() });
+    const data = await r.json();
+    tree.innerHTML = renderTree(data.tree || []);
+  } catch { tree.textContent = 'Failed to load'; }
+}
+function renderTree(items, depth = 0) {
+  return items.map(item => {
+    const icon = item.type === 'dir' ? '📁' : getFileIcon(item.name);
+    const children = item.children?.length
+      ? `<div class="tree-children">${renderTree(item.children, depth + 1)}</div>` : '';
+    const onclick = item.type === 'file'
+      ? `onclick="readFileIntoChat('${item.path.replace(/'/g, "\\'")}')"`
+      : `onclick="this.nextElementSibling?.classList.toggle('hidden')"`;
+    return `<div class="tree-item ${item.type}" ${onclick}>
+      <span class="tree-icon">${icon}</span>
+      <span>${escHtml(item.name)}</span>
+    </div>${children ? `<div class="tree-children">${renderTree(item.children || [], depth+1)}</div>` : ''}`;
+  }).join('');
+}
+function getFileIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const icons = { py:'🐍', js:'🟨', ts:'🔷', json:'📋', md:'📝', txt:'📄', html:'🌐', css:'🎨', sh:'⚙️', yml:'⚙️', yaml:'⚙️', pdf:'📕', csv:'📊', png:'🖼️', jpg:'🖼️', jpeg:'🖼️' };
+  return icons[ext] || '📄';
+}
+async function readFileIntoChat(path) {
+  closeExplorer();
+  $('unified-input').value = `Read the file: ${path}`;
+  sendSmartMessage();
+}
+$('explorer-btn').addEventListener('click', openExplorer);
+$('explorer-close-btn').addEventListener('click', closeExplorer);
+$('explorer-overlay').addEventListener('click', closeExplorer);
+
+/* ── Terminal panel ── */
+function openTerminal() {
+  $('terminal-panel').classList.remove('hidden');
+  $('terminal-input').focus();
+}
+function closeTerminal() {
+  $('terminal-panel').classList.add('hidden');
+}
+function termPrint(text, cls = 't-out') {
+  const out = $('terminal-output');
+  const el = document.createElement('span');
+  el.className = cls;
+  el.textContent = text;
+  out.appendChild(el);
+  out.appendChild(document.createElement('br'));
+  out.scrollTop = out.scrollHeight;
+}
+async function runTerminalCommand() {
+  const cmd = $('terminal-input').value.trim();
+  if (!cmd) return;
+  $('terminal-input').value = '';
+  termPrint(`$ ${cmd}`, 't-cmd');
+  try {
+    const r = await fetch('/api/task/run', {
+      method: 'POST',
+      headers: { ...getAuthHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task: `execute_bash: ${cmd}`, direct_bash: cmd }),
+    });
+    // Try to execute via bash directly through the smart stream
+    const fd = new FormData();
+    fd.append('message', `Run this bash command and show me the output: \`${cmd}\``);
+    fd.append('history', '[]');
+    const res = await fetch('/api/smart/stream', { method:'POST', headers: getAuthHeader(), body: fd });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let output = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const line of decoder.decode(value).split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') break;
+        try {
+          const evt = JSON.parse(payload);
+          if (evt.type === 'text') output += evt.content;
+        } catch {}
+      }
+    }
+    termPrint(output.trim() || '(no output)', 't-out');
+  } catch(e) {
+    termPrint(`Error: ${e.message}`, 't-err');
+  }
+}
+$('terminal-btn').addEventListener('click', openTerminal);
+$('terminal-close-btn').addEventListener('click', closeTerminal);
+$('terminal-run-btn').addEventListener('click', runTerminalCommand);
+$('terminal-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') runTerminalCommand();
+  if (e.key === 'Escape') closeTerminal();
+});
+$('terminal-clear-btn').addEventListener('click', () => { $('terminal-output').innerHTML = ''; });
+
+/* ── Command palette (Ctrl+K) ── */
+const COMMANDS = [
+  { icon: '✏️', label: 'New Chat', shortcut: 'Ctrl+N', action: () => newChat() },
+  { icon: '🕐', label: 'Chat History', shortcut: '', action: () => openHistory() },
+  { icon: '⬇️', label: 'Export Conversation', shortcut: '', action: () => exportConversation() },
+  { icon: '📁', label: 'File Explorer', shortcut: '', action: () => openExplorer() },
+  { icon: '⚡', label: 'Terminal', shortcut: '', action: () => openTerminal() },
+  { icon: '🔍', label: 'Search the web…', shortcut: '', action: () => cmdPrompt('Search the web for: ') },
+  { icon: '📸', label: 'Screenshot a URL…', shortcut: '', action: () => cmdPrompt('Take a screenshot of: ') },
+  { icon: '🐍', label: 'Run Python code', shortcut: '', action: () => cmdPrompt('Write and run Python code to: ') },
+  { icon: '📂', label: 'List project files', shortcut: '', action: () => chipSend('List all files in the current directory') },
+  { icon: '🔎', label: 'Analyze project structure', shortcut: '', action: () => chipSend('Summarize the project structure') },
+];
+
+let cmdActiveIdx = 0;
+
+function cmdPrompt(prefix) {
+  closeCmdPalette();
+  $('unified-input').value = prefix;
+  $('unified-input').focus();
+}
+
+function openCmdPalette() {
+  $('cmd-overlay').classList.remove('hidden');
+  $('cmd-input').value = '';
+  renderCmdList(COMMANDS);
+  $('cmd-input').focus();
+  cmdActiveIdx = 0;
+}
+
+function closeCmdPalette() {
+  $('cmd-overlay').classList.add('hidden');
+}
+
+function renderCmdList(cmds) {
+  $('cmd-list').innerHTML = cmds.map((c, i) => `
+    <div class="cmd-item ${i === cmdActiveIdx ? 'active' : ''}" data-idx="${i}">
+      <span class="cmd-icon">${c.icon}</span>
+      <span class="cmd-label">${escHtml(c.label)}</span>
+      ${c.shortcut ? `<span class="cmd-shortcut">${c.shortcut}</span>` : ''}
+    </div>`).join('');
+  $('cmd-list').querySelectorAll('.cmd-item').forEach((el, i) => {
+    el.addEventListener('click', () => { cmds[i].action(); closeCmdPalette(); });
+  });
+}
+
+$('cmd-input').addEventListener('input', () => {
+  const q = $('cmd-input').value.toLowerCase();
+  const filtered = COMMANDS.filter(c => c.label.toLowerCase().includes(q));
+  cmdActiveIdx = 0;
+  renderCmdList(filtered);
+});
+
+$('cmd-input').addEventListener('keydown', e => {
+  const items = $('cmd-list').querySelectorAll('.cmd-item');
+  if (e.key === 'ArrowDown') { e.preventDefault(); cmdActiveIdx = Math.min(cmdActiveIdx + 1, items.length - 1); items.forEach((el,i) => el.classList.toggle('active', i === cmdActiveIdx)); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); cmdActiveIdx = Math.max(cmdActiveIdx - 1, 0); items.forEach((el,i) => el.classList.toggle('active', i === cmdActiveIdx)); }
+  if (e.key === 'Enter') { e.preventDefault(); items[cmdActiveIdx]?.click(); }
+  if (e.key === 'Escape') closeCmdPalette();
+});
+
+$('cmd-overlay').addEventListener('click', e => { if (e.target === $('cmd-overlay')) closeCmdPalette(); });
+
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); openCmdPalette(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') { e.preventDefault(); newChat(); }
+});
 
 $('unified-send-btn').addEventListener('click', sendSmartMessage);
 $('unified-input').addEventListener('keydown', e => {

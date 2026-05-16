@@ -402,3 +402,182 @@ select:focus { border-color: var(--accent); }
 .history-item:hover .hi-del { opacity: 1; }
 .history-item .hi-del:hover { color: var(--err); }
 .history-empty { color: var(--muted); font-size: 13px; text-align: center; padding: 24px 12px; }
+
+/* ── File explorer sidebar ── */
+.explorer-panel {
+  position: fixed;
+  top: 0; left: 0;
+  width: 280px;
+  height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  transition: transform .25s;
+}
+.explorer-panel.hidden { transform: translateX(-100%); }
+.explorer-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 199;
+}
+.explorer-overlay.hidden { display: none; }
+.explorer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.explorer-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 4px;
+  font-size: 13px;
+  font-family: monospace;
+}
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  user-select: none;
+}
+.tree-item:hover { background: var(--surface2); }
+.tree-item.dir { color: var(--accent2); }
+.tree-item .tree-icon { flex-shrink: 0; }
+.tree-children { padding-left: 16px; }
+
+/* ── Terminal panel ── */
+.terminal-panel {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 300px;
+  background: #0d0d0d;
+  border-top: 2px solid var(--accent2);
+  display: flex;
+  flex-direction: column;
+  z-index: 300;
+  transition: transform .25s;
+}
+.terminal-panel.hidden { transform: translateY(100%); }
+.terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent2);
+  flex-shrink: 0;
+  background: #111;
+}
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-output .t-cmd { color: var(--accent2); }
+.terminal-output .t-out { color: #d4d4d4; }
+.terminal-output .t-err { color: var(--err); }
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid rgba(255,255,255,.1);
+  background: #111;
+  flex-shrink: 0;
+}
+.terminal-prompt { color: var(--accent2); font-family: monospace; font-size: 13px; }
+.terminal-input {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #d4d4d4;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 13px;
+  outline: none;
+}
+
+/* ── Command palette ── */
+.cmd-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 500;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+}
+.cmd-overlay.hidden { display: none; }
+.cmd-palette {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 540px;
+  max-width: 90vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,.6);
+  overflow: hidden;
+}
+.cmd-input {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 16px;
+  padding: 16px 18px;
+  outline: none;
+  font-family: inherit;
+}
+.cmd-list { max-height: 320px; overflow-y: auto; }
+.cmd-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 18px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background .1s;
+}
+.cmd-item:hover, .cmd-item.active { background: var(--surface2); }
+.cmd-item .cmd-icon { font-size: 18px; flex-shrink: 0; }
+.cmd-item .cmd-label { flex: 1; }
+.cmd-item .cmd-shortcut { color: var(--muted); font-size: 11px; }
+
+/* ── Drag-over highlight ── */
+.chat-messages.drag-over {
+  border: 2px dashed var(--accent);
+  background: rgba(108, 99, 255, 0.05);
+}
+
+/* ── Prism code override ── */
+.umsg-content pre[class*="language-"] {
+  background: rgba(0,0,0,.35) !important;
+  border-radius: 8px;
+  padding: 10px 14px;
+  overflow-x: auto;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.umsg-content code[class*="language-"] {
+  font-size: 13px;
+}
